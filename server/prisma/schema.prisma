@@ -202,9 +202,11 @@ model LicenseTierConfig {
   features        Json
 
   // Limits
-  maxUsers        Int?
-  maxProducts     Int?
-  maxTransactions Int?
+  maxUsers        Int?        // Maximum users per license
+  maxProducts     Int?        // Maximum products in inventory
+  maxTransactions Int?        // Maximum transactions per period
+  maxBranches     Int?        // Maximum pharmacy branches (null = unlimited)
+  maxActivations  Int?        // Maximum device activations per license (null = unlimited)
 
   isActive        Boolean     @default(true)
   createdAt       DateTime    @default(now())

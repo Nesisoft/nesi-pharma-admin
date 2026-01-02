@@ -14,6 +14,8 @@ import {
   UsersIcon,
   CubeIcon,
   ClockIcon,
+  BuildingStorefrontIcon,
+  ComputerDesktopIcon,
 } from '@heroicons/react/24/outline';
 
 interface TierConfig {
@@ -28,6 +30,8 @@ interface TierConfig {
   maxUsers: number | null;
   maxProducts: number | null;
   maxTransactions: number | null;
+  maxBranches: number | null;
+  maxActivations: number | null;
   isActive: boolean;
   createdAt: string;
   updatedAt: string;
@@ -102,6 +106,8 @@ export default function TierConfigsPage() {
       durationDays: tier.durationDays,
       maxUsers: tier.maxUsers,
       maxProducts: tier.maxProducts,
+      maxBranches: tier.maxBranches,
+      maxActivations: tier.maxActivations,
       isActive: tier.isActive,
     });
   };
@@ -287,6 +293,27 @@ export default function TierConfigsPage() {
               <div className="space-y-2 pt-2 border-t border-gray-200">
                 <div className="flex items-center justify-between text-sm">
                   <div className="flex items-center gap-2">
+                    <BuildingStorefrontIcon className="h-4 w-4 text-gray-400" />
+                    <span className="text-gray-600">Max Branches</span>
+                  </div>
+                  {editingTier === tier.tier ? (
+                    <input
+                      type="number"
+                      value={editForm.maxBranches ?? -1}
+                      onChange={(e) => setEditForm({ ...editForm, maxBranches: parseInt(e.target.value) })}
+                      className="input text-sm w-20"
+                      min={-1}
+                      placeholder="-1 for unlimited"
+                    />
+                  ) : (
+                    <span className="font-medium">
+                      {tier.maxBranches === null || tier.maxBranches === -1 ? 'Unlimited' : tier.maxBranches}
+                    </span>
+                  )}
+                </div>
+
+                <div className="flex items-center justify-between text-sm">
+                  <div className="flex items-center gap-2">
                     <UsersIcon className="h-4 w-4 text-gray-400" />
                     <span className="text-gray-600">Max Users</span>
                   </div>
@@ -302,6 +329,27 @@ export default function TierConfigsPage() {
                   ) : (
                     <span className="font-medium">
                       {tier.maxUsers === null || tier.maxUsers === -1 ? 'Unlimited' : tier.maxUsers}
+                    </span>
+                  )}
+                </div>
+
+                <div className="flex items-center justify-between text-sm">
+                  <div className="flex items-center gap-2">
+                    <ComputerDesktopIcon className="h-4 w-4 text-gray-400" />
+                    <span className="text-gray-600">Max Activations</span>
+                  </div>
+                  {editingTier === tier.tier ? (
+                    <input
+                      type="number"
+                      value={editForm.maxActivations ?? -1}
+                      onChange={(e) => setEditForm({ ...editForm, maxActivations: parseInt(e.target.value) })}
+                      className="input text-sm w-20"
+                      min={-1}
+                      placeholder="-1 for unlimited"
+                    />
+                  ) : (
+                    <span className="font-medium">
+                      {tier.maxActivations === null || tier.maxActivations === -1 ? 'Unlimited' : tier.maxActivations}
                     </span>
                   )}
                 </div>

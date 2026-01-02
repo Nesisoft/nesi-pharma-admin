@@ -62,6 +62,8 @@ export async function updateTierConfig(req: Request, res: Response): Promise<voi
       maxUsers,
       maxProducts,
       maxTransactions,
+      maxBranches,
+      maxActivations,
       isActive,
     } = req.body;
 
@@ -85,6 +87,8 @@ export async function updateTierConfig(req: Request, res: Response): Promise<voi
     if (maxUsers !== undefined) updateData.maxUsers = maxUsers;
     if (maxProducts !== undefined) updateData.maxProducts = maxProducts;
     if (maxTransactions !== undefined) updateData.maxTransactions = maxTransactions;
+    if (maxBranches !== undefined) updateData.maxBranches = maxBranches;
+    if (maxActivations !== undefined) updateData.maxActivations = maxActivations;
     if (isActive !== undefined) updateData.isActive = isActive;
 
     const tierConfig = await prisma.licenseTierConfig.update({
@@ -119,6 +123,10 @@ export async function updateTierConfig(req: Request, res: Response): Promise<voi
  */
 export async function resetTierConfigs(req: Request, res: Response): Promise<void> {
   try {
+    // Tier limits:
+    // - Standard: 1 branch, 3 users, 3 activations (1 branch × 3 devices)
+    // - Professional: 3 branches, 10 users, 9 activations (3 branches × 3 devices)
+    // - Enterprise: unlimited branches, unlimited users, unlimited activations
     const defaultConfigs = [
       {
         tier: LicenseTier.BASIC,
@@ -141,11 +149,13 @@ export async function resetTierConfigs(req: Request, res: Response): Promise<voi
         maxUsers: 1,
         maxProducts: 100,
         maxTransactions: null,
+        maxBranches: 1,
+        maxActivations: 1,
       },
       {
         tier: LicenseTier.STANDARD,
         name: 'Standard',
-        description: 'Enhanced features for growing pharmacies',
+        description: 'Enhanced features for growing pharmacies - 1 branch, up to 3 users',
         price: 500,
         currency: 'GHS',
         durationDays: 365,
@@ -166,11 +176,13 @@ export async function resetTierConfigs(req: Request, res: Response): Promise<voi
         maxUsers: 3,
         maxProducts: 500,
         maxTransactions: null,
+        maxBranches: 1,
+        maxActivations: 3,
       },
       {
         tier: LicenseTier.PROFESSIONAL,
         name: 'Professional',
-        description: 'Advanced features for established pharmacies',
+        description: 'Advanced features for established pharmacies - 3 branches, up to 10 users',
         price: 1200,
         currency: 'GHS',
         durationDays: 365,
@@ -195,11 +207,13 @@ export async function resetTierConfigs(req: Request, res: Response): Promise<voi
         maxUsers: 10,
         maxProducts: 2000,
         maxTransactions: null,
+        maxBranches: 3,
+        maxActivations: 9,
       },
       {
         tier: LicenseTier.ENTERPRISE,
         name: 'Enterprise',
-        description: 'Full-featured solution for pharmacy chains',
+        description: 'Full-featured solution for pharmacy chains - unlimited branches and users',
         price: 3000,
         currency: 'GHS',
         durationDays: 365,
@@ -228,6 +242,8 @@ export async function resetTierConfigs(req: Request, res: Response): Promise<voi
         maxUsers: null,
         maxProducts: null,
         maxTransactions: null,
+        maxBranches: null,
+        maxActivations: null,
       },
     ];
 
