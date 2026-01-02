@@ -16,6 +16,7 @@ import CreatePharmacyPage from '@/pages/CreatePharmacyPage';
 import AdminUsersPage from '@/pages/AdminUsersPage';
 import AuditLogsPage from '@/pages/AuditLogsPage';
 import SettingsPage from '@/pages/SettingsPage';
+import TierConfigsPage from '@/pages/TierConfigsPage';
 
 // Components
 import LoadingSpinner from '@/components/ui/LoadingSpinner';
@@ -61,6 +62,7 @@ function App() {
         <Route path="pharmacies/new" element={<CreatePharmacyPage />} />
         <Route path="pharmacies/:id" element={<PharmacyDetailPage />} />
         <Route path="admin-users" element={<AdminUsersPage />} />
+        <Route path="tier-configs" element={<TierConfigsPage />} />
         <Route path="audit-logs" element={<AuditLogsPage />} />
         <Route path="settings" element={<SettingsPage />} />
       </Route>
