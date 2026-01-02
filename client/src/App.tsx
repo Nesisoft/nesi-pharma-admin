@@ -12,6 +12,7 @@ import LicenseDetailPage from '@/pages/LicenseDetailPage';
 import GenerateLicensePage from '@/pages/GenerateLicensePage';
 import PharmaciesPage from '@/pages/PharmaciesPage';
 import PharmacyDetailPage from '@/pages/PharmacyDetailPage';
+import CreatePharmacyPage from '@/pages/CreatePharmacyPage';
 import AdminUsersPage from '@/pages/AdminUsersPage';
 import AuditLogsPage from '@/pages/AuditLogsPage';
 import SettingsPage from '@/pages/SettingsPage';
@@ -57,6 +58,7 @@ function App() {
         <Route path="licenses/generate" element={<GenerateLicensePage />} />
         <Route path="licenses/:id" element={<LicenseDetailPage />} />
         <Route path="pharmacies" element={<PharmaciesPage />} />
+        <Route path="pharmacies/new" element={<CreatePharmacyPage />} />
         <Route path="pharmacies/:id" element={<PharmacyDetailPage />} />
         <Route path="admin-users" element={<AdminUsersPage />} />
         <Route path="audit-logs" element={<AuditLogsPage />} />
