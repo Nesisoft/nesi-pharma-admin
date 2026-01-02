@@ -136,10 +136,17 @@ export async function activateLicense(req: Request, res: Response): Promise<void
       return;
     }
 
-    // Find license
+    // Find license with pharmacy info
     const license = await prisma.license.findUnique({
       where: { licenseKey: licenseKey.toUpperCase() },
       include: {
+        pharmacy: {
+          select: {
+            id: true,
+            name: true,
+            status: true,
+          },
+        },
         activations: {
           where: { isActive: true },
         },
@@ -159,6 +166,12 @@ export async function activateLicense(req: Request, res: Response): Promise<void
 
     if (license.status === LicenseStatus.EXPIRED) {
       sendError(res, 'License has expired', 403);
+      return;
+    }
+
+    // Check pharmacy status if assigned
+    if (license.pharmacy && license.pharmacy.status !== PharmacyStatus.ACTIVE) {
+      sendError(res, `Pharmacy account is ${license.pharmacy.status.toLowerCase()}. Contact support to reactivate.`, 403);
       return;
     }
 
@@ -215,6 +228,10 @@ export async function activateLicense(req: Request, res: Response): Promise<void
             status: PharmacyStatus.ACTIVE,
           },
         });
+      } else if (pharmacy.status !== PharmacyStatus.ACTIVE) {
+        // Existing pharmacy is not active
+        sendError(res, `Pharmacy account is ${pharmacy.status.toLowerCase()}. Contact support to reactivate.`, 403);
+        return;
       }
       pharmacyId = pharmacy.id;
     }

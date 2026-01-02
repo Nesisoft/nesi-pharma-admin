@@ -13,6 +13,7 @@ import GenerateLicensePage from '@/pages/GenerateLicensePage';
 import PharmaciesPage from '@/pages/PharmaciesPage';
 import PharmacyDetailPage from '@/pages/PharmacyDetailPage';
 import CreatePharmacyPage from '@/pages/CreatePharmacyPage';
+import EditPharmacyPage from '@/pages/EditPharmacyPage';
 import AdminUsersPage from '@/pages/AdminUsersPage';
 import AuditLogsPage from '@/pages/AuditLogsPage';
 import SettingsPage from '@/pages/SettingsPage';
@@ -61,6 +62,7 @@ function App() {
         <Route path="pharmacies" element={<PharmaciesPage />} />
         <Route path="pharmacies/new" element={<CreatePharmacyPage />} />
         <Route path="pharmacies/:id" element={<PharmacyDetailPage />} />
+        <Route path="pharmacies/:id/edit" element={<EditPharmacyPage />} />
         <Route path="admin-users" element={<AdminUsersPage />} />
         <Route path="tier-configs" element={<TierConfigsPage />} />
         <Route path="audit-logs" element={<AuditLogsPage />} />
