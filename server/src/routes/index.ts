@@ -6,6 +6,7 @@ import pharmacyRoutes from './pharmacy.routes';
 import adminUserRoutes from './adminUser.routes';
 import dashboardRoutes from './dashboard.routes';
 import auditLogRoutes from './auditLog.routes';
+import tierConfigRoutes from './tierConfig.routes';
 
 const router = Router();
 
@@ -33,6 +34,7 @@ router.get('/', (_, res) => {
       'admin-users': '/api/admin-users',
       dashboard: '/api/dashboard',
       'audit-logs': '/api/audit-logs',
+      'tier-configs': '/api/tier-configs',
     },
   });
 });
@@ -57,5 +59,8 @@ router.use('/dashboard', dashboardRoutes);
 
 // Audit log routes
 router.use('/audit-logs', auditLogRoutes);
+
+// Tier configuration routes
+router.use('/tier-configs', tierConfigRoutes);
 
 export default router;

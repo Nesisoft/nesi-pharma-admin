@@ -77,6 +77,61 @@ export default function CreatePharmacyPage() {
     'Savannah',
   ];
 
+  const countries = [
+    'Ghana',
+    'Nigeria',
+    'South Africa',
+    'Kenya',
+    'Tanzania',
+    'Uganda',
+    'Rwanda',
+    'Ethiopia',
+    'Cameroon',
+    'Ivory Coast',
+    'Senegal',
+    'Togo',
+    'Benin',
+    'Burkina Faso',
+    'Mali',
+    'Niger',
+    'Guinea',
+    'Sierra Leone',
+    'Liberia',
+    'Gambia',
+    'Egypt',
+    'Morocco',
+    'Algeria',
+    'Tunisia',
+    'Libya',
+    'Sudan',
+    'Zimbabwe',
+    'Zambia',
+    'Botswana',
+    'Namibia',
+    'Mozambique',
+    'Angola',
+    'Democratic Republic of Congo',
+    'Republic of Congo',
+    'Gabon',
+    'Equatorial Guinea',
+    'Central African Republic',
+    'Chad',
+    'Mauritania',
+    'Somalia',
+    'Djibouti',
+    'Eritrea',
+    'South Sudan',
+    'Malawi',
+    'Madagascar',
+    'Mauritius',
+    'Seychelles',
+    'Comoros',
+    'Cape Verde',
+    'Sao Tome and Principe',
+    'Eswatini',
+    'Lesotho',
+  ];
+
   return (
     <div className="space-y-6">
       {/* Header */}
@@ -209,15 +264,19 @@ export default function CreatePharmacyPage() {
                   <label htmlFor="country" className="label">
                     Country
                   </label>
-                  <input
-                    type="text"
+                  <select
                     id="country"
                     name="country"
                     value={formData.country}
                     onChange={handleChange}
                     className="input"
-                    placeholder="Country"
-                  />
+                  >
+                    {countries.map((country) => (
+                      <option key={country} value={country}>
+                        {country}
+                      </option>
+                    ))}
+                  </select>
                 </div>
               </div>
 
