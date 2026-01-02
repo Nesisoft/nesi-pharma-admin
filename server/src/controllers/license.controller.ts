@@ -1,0 +1,607 @@
+import { Request, Response } from 'express';
+import { LicenseTier, LicenseStatus, AuditAction } from '@prisma/client';
+import prisma from '../lib/prisma';
+import {
+  generateLicenseKey,
+  generateBulkLicenseKeys,
+  validateLicenseKeyFormat,
+  maskLicenseKey,
+} from '../utils/licenseKey';
+import {
+  sendSuccess,
+  sendPaginatedSuccess,
+  sendError,
+  sendNotFound,
+} from '../utils/apiResponse';
+
+/**
+ * Get all licenses with pagination and filters
+ */
+export async function getLicenses(req: Request, res: Response): Promise<void> {
+  try {
+    const page = parseInt(req.query.page as string) || 1;
+    const limit = parseInt(req.query.limit as string) || 10;
+    const skip = (page - 1) * limit;
+
+    // Filters
+    const tier = req.query.tier as LicenseTier | undefined;
+    const status = req.query.status as LicenseStatus | undefined;
+    const search = req.query.search as string | undefined;
+    const pharmacyId = req.query.pharmacyId as string | undefined;
+
+    const where: Record<string, unknown> = {};
+
+    if (tier) where.tier = tier;
+    if (status) where.status = status;
+    if (pharmacyId) where.pharmacyId = pharmacyId;
+    if (search) {
+      where.OR = [
+        { licenseKey: { contains: search, mode: 'insensitive' } },
+        { pharmacy: { name: { contains: search, mode: 'insensitive' } } },
+        { pharmacy: { email: { contains: search, mode: 'insensitive' } } },
+      ];
+    }
+
+    const [licenses, total] = await Promise.all([
+      prisma.license.findMany({
+        where,
+        skip,
+        take: limit,
+        orderBy: { createdAt: 'desc' },
+        include: {
+          pharmacy: {
+            select: {
+              id: true,
+              name: true,
+              email: true,
+            },
+          },
+          generatedBy: {
+            select: {
+              id: true,
+              firstName: true,
+              lastName: true,
+            },
+          },
+          _count: {
+            select: { activations: true },
+          },
+        },
+      }),
+      prisma.license.count({ where }),
+    ]);
+
+    sendPaginatedSuccess(res, licenses, page, limit, total);
+  } catch (error) {
+    console.error('Get licenses error:', error);
+    sendError(res, 'Failed to fetch licenses', 500);
+  }
+}
+
+/**
+ * Get a single license by ID
+ */
+export async function getLicense(req: Request, res: Response): Promise<void> {
+  try {
+    const { id } = req.params;
+
+    const license = await prisma.license.findUnique({
+      where: { id },
+      include: {
+        pharmacy: true,
+        generatedBy: {
+          select: {
+            id: true,
+            firstName: true,
+            lastName: true,
+            email: true,
+          },
+        },
+        activations: {
+          orderBy: { activatedAt: 'desc' },
+        },
+        verifications: {
+          orderBy: { verifiedAt: 'desc' },
+          take: 10,
+        },
+      },
+    });
+
+    if (!license) {
+      sendNotFound(res, 'License');
+      return;
+    }
+
+    sendSuccess(res, license);
+  } catch (error) {
+    console.error('Get license error:', error);
+    sendError(res, 'Failed to fetch license', 500);
+  }
+}
+
+/**
+ * Generate a new license key
+ */
+export async function generateLicense(req: Request, res: Response): Promise<void> {
+  try {
+    const {
+      tier,
+      pharmacyId,
+      durationDays = 365,
+      maxActivations = 1,
+      notes,
+      features,
+    } = req.body;
+
+    if (!tier || !Object.values(LicenseTier).includes(tier)) {
+      sendError(res, 'Valid tier is required (STANDARD, PROFESSIONAL, ENTERPRISE)', 400);
+      return;
+    }
+
+    if (tier === LicenseTier.BASIC) {
+      sendError(res, 'Cannot generate license for BASIC tier (free tier)', 400);
+      return;
+    }
+
+    // Generate unique license key
+    let licenseKey = generateLicenseKey(tier);
+    let attempts = 0;
+    const maxAttempts = 10;
+
+    while (attempts < maxAttempts) {
+      const existing = await prisma.license.findUnique({
+        where: { licenseKey },
+      });
+      if (!existing) break;
+      licenseKey = generateLicenseKey(tier);
+      attempts++;
+    }
+
+    if (attempts >= maxAttempts) {
+      sendError(res, 'Failed to generate unique license key', 500);
+      return;
+    }
+
+    // Create license
+    const license = await prisma.license.create({
+      data: {
+        licenseKey,
+        tier,
+        status: LicenseStatus.INACTIVE,
+        durationDays,
+        maxActivations,
+        pharmacyId: pharmacyId || null,
+        notes,
+        features: features || getDefaultFeatures(tier),
+        generatedById: req.user?.id,
+      },
+      include: {
+        pharmacy: {
+          select: {
+            id: true,
+            name: true,
+            email: true,
+          },
+        },
+      },
+    });
+
+    // Create audit log
+    await prisma.auditLog.create({
+      data: {
+        action: AuditAction.GENERATE,
+        entityType: 'License',
+        entityId: license.id,
+        adminUserId: req.user?.id,
+        description: `Generated ${tier} license: ${maskLicenseKey(licenseKey)}`,
+        newValue: { tier, licenseKey: maskLicenseKey(licenseKey) },
+        ipAddress: req.ip,
+        userAgent: req.headers['user-agent'],
+      },
+    });
+
+    sendSuccess(res, license, 'License generated successfully', 201);
+  } catch (error) {
+    console.error('Generate license error:', error);
+    sendError(res, 'Failed to generate license', 500);
+  }
+}
+
+/**
+ * Generate multiple licenses at once
+ */
+export async function generateBulkLicenses(req: Request, res: Response): Promise<void> {
+  try {
+    const {
+      tier,
+      count,
+      durationDays = 365,
+      maxActivations = 1,
+      notes,
+    } = req.body;
+
+    if (!tier || !Object.values(LicenseTier).includes(tier)) {
+      sendError(res, 'Valid tier is required', 400);
+      return;
+    }
+
+    if (tier === LicenseTier.BASIC) {
+      sendError(res, 'Cannot generate license for BASIC tier', 400);
+      return;
+    }
+
+    const requestedCount = parseInt(count) || 1;
+    if (requestedCount < 1 || requestedCount > 100) {
+      sendError(res, 'Count must be between 1 and 100', 400);
+      return;
+    }
+
+    // Generate unique keys
+    const licenseKeys = generateBulkLicenseKeys(tier, requestedCount);
+    const features = getDefaultFeatures(tier);
+
+    // Create licenses
+    const licenses = await Promise.all(
+      licenseKeys.map((licenseKey) =>
+        prisma.license.create({
+          data: {
+            licenseKey,
+            tier,
+            status: LicenseStatus.INACTIVE,
+            durationDays,
+            maxActivations,
+            notes,
+            features,
+            generatedById: req.user?.id,
+          },
+        })
+      )
+    );
+
+    // Create audit log
+    await prisma.auditLog.create({
+      data: {
+        action: AuditAction.GENERATE,
+        entityType: 'License',
+        adminUserId: req.user?.id,
+        description: `Bulk generated ${requestedCount} ${tier} licenses`,
+        newValue: { tier, count: requestedCount },
+        ipAddress: req.ip,
+        userAgent: req.headers['user-agent'],
+      },
+    });
+
+    sendSuccess(
+      res,
+      {
+        count: licenses.length,
+        licenses: licenses.map((l) => ({
+          id: l.id,
+          licenseKey: l.licenseKey,
+          tier: l.tier,
+        })),
+      },
+      `Generated ${licenses.length} licenses`,
+      201
+    );
+  } catch (error) {
+    console.error('Bulk generate licenses error:', error);
+    sendError(res, 'Failed to generate licenses', 500);
+  }
+}
+
+/**
+ * Update license details
+ */
+export async function updateLicense(req: Request, res: Response): Promise<void> {
+  try {
+    const { id } = req.params;
+    const { status, pharmacyId, durationDays, maxActivations, notes, features } = req.body;
+
+    const existing = await prisma.license.findUnique({
+      where: { id },
+    });
+
+    if (!existing) {
+      sendNotFound(res, 'License');
+      return;
+    }
+
+    const updateData: Record<string, unknown> = {};
+
+    if (status && Object.values(LicenseStatus).includes(status)) {
+      updateData.status = status;
+    }
+    if (pharmacyId !== undefined) updateData.pharmacyId = pharmacyId || null;
+    if (durationDays) updateData.durationDays = durationDays;
+    if (maxActivations) updateData.maxActivations = maxActivations;
+    if (notes !== undefined) updateData.notes = notes;
+    if (features) updateData.features = features;
+
+    const license = await prisma.license.update({
+      where: { id },
+      data: updateData,
+      include: {
+        pharmacy: {
+          select: {
+            id: true,
+            name: true,
+            email: true,
+          },
+        },
+      },
+    });
+
+    // Create audit log
+    await prisma.auditLog.create({
+      data: {
+        action: AuditAction.UPDATE,
+        entityType: 'License',
+        entityId: license.id,
+        adminUserId: req.user?.id,
+        description: `Updated license: ${maskLicenseKey(license.licenseKey)}`,
+        previousValue: existing,
+        newValue: updateData,
+        ipAddress: req.ip,
+        userAgent: req.headers['user-agent'],
+      },
+    });
+
+    sendSuccess(res, license, 'License updated successfully');
+  } catch (error) {
+    console.error('Update license error:', error);
+    sendError(res, 'Failed to update license', 500);
+  }
+}
+
+/**
+ * Revoke a license
+ */
+export async function revokeLicense(req: Request, res: Response): Promise<void> {
+  try {
+    const { id } = req.params;
+    const { reason } = req.body;
+
+    const license = await prisma.license.findUnique({
+      where: { id },
+    });
+
+    if (!license) {
+      sendNotFound(res, 'License');
+      return;
+    }
+
+    if (license.status === LicenseStatus.REVOKED) {
+      sendError(res, 'License is already revoked', 400);
+      return;
+    }
+
+    const updated = await prisma.license.update({
+      where: { id },
+      data: {
+        status: LicenseStatus.REVOKED,
+        notes: reason ? `${license.notes || ''}\nRevoked: ${reason}`.trim() : license.notes,
+      },
+    });
+
+    // Deactivate all activations
+    await prisma.licenseActivation.updateMany({
+      where: { licenseId: id, isActive: true },
+      data: { isActive: false, deactivatedAt: new Date() },
+    });
+
+    // Create audit log
+    await prisma.auditLog.create({
+      data: {
+        action: AuditAction.REVOKE,
+        entityType: 'License',
+        entityId: id,
+        adminUserId: req.user?.id,
+        description: `Revoked license: ${maskLicenseKey(license.licenseKey)}`,
+        previousValue: { status: license.status },
+        newValue: { status: LicenseStatus.REVOKED, reason },
+        ipAddress: req.ip,
+        userAgent: req.headers['user-agent'],
+      },
+    });
+
+    sendSuccess(res, updated, 'License revoked successfully');
+  } catch (error) {
+    console.error('Revoke license error:', error);
+    sendError(res, 'Failed to revoke license', 500);
+  }
+}
+
+/**
+ * Delete a license (soft delete by setting status)
+ */
+export async function deleteLicense(req: Request, res: Response): Promise<void> {
+  try {
+    const { id } = req.params;
+
+    const license = await prisma.license.findUnique({
+      where: { id },
+      include: { _count: { select: { activations: true } } },
+    });
+
+    if (!license) {
+      sendNotFound(res, 'License');
+      return;
+    }
+
+    // Only allow deletion if never activated
+    if (license._count.activations > 0) {
+      sendError(res, 'Cannot delete license that has been activated. Revoke it instead.', 400);
+      return;
+    }
+
+    await prisma.license.delete({
+      where: { id },
+    });
+
+    // Create audit log
+    await prisma.auditLog.create({
+      data: {
+        action: AuditAction.DELETE,
+        entityType: 'License',
+        entityId: id,
+        adminUserId: req.user?.id,
+        description: `Deleted license: ${maskLicenseKey(license.licenseKey)}`,
+        previousValue: { tier: license.tier, status: license.status },
+        ipAddress: req.ip,
+        userAgent: req.headers['user-agent'],
+      },
+    });
+
+    sendSuccess(res, null, 'License deleted successfully');
+  } catch (error) {
+    console.error('Delete license error:', error);
+    sendError(res, 'Failed to delete license', 500);
+  }
+}
+
+/**
+ * Get license statistics
+ */
+export async function getLicenseStats(req: Request, res: Response): Promise<void> {
+  try {
+    const [
+      totalLicenses,
+      byTier,
+      byStatus,
+      recentActivations,
+      recentVerifications,
+    ] = await Promise.all([
+      prisma.license.count(),
+      prisma.license.groupBy({
+        by: ['tier'],
+        _count: { id: true },
+      }),
+      prisma.license.groupBy({
+        by: ['status'],
+        _count: { id: true },
+      }),
+      prisma.licenseActivation.count({
+        where: {
+          activatedAt: {
+            gte: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000), // Last 30 days
+          },
+        },
+      }),
+      prisma.licenseVerification.count({
+        where: {
+          verifiedAt: {
+            gte: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000),
+          },
+        },
+      }),
+    ]);
+
+    const tierStats = Object.fromEntries(
+      byTier.map((t) => [t.tier, t._count.id])
+    );
+
+    const statusStats = Object.fromEntries(
+      byStatus.map((s) => [s.status, s._count.id])
+    );
+
+    sendSuccess(res, {
+      total: totalLicenses,
+      byTier: tierStats,
+      byStatus: statusStats,
+      last30Days: {
+        activations: recentActivations,
+        verifications: recentVerifications,
+      },
+    });
+  } catch (error) {
+    console.error('Get license stats error:', error);
+    sendError(res, 'Failed to fetch license statistics', 500);
+  }
+}
+
+/**
+ * Get default features for a tier
+ */
+function getDefaultFeatures(tier: LicenseTier): Record<string, unknown> {
+  const features: Record<LicenseTier, Record<string, unknown>> = {
+    BASIC: {
+      maxUsers: 1,
+      maxProducts: 100,
+      salesTracking: true,
+      inventoryManagement: true,
+      basicReports: true,
+      advancedAnalytics: false,
+      multiLocation: false,
+      apiAccess: false,
+      prioritySupport: false,
+    },
+    STANDARD: {
+      maxUsers: 3,
+      maxProducts: 500,
+      salesTracking: true,
+      inventoryManagement: true,
+      basicReports: true,
+      advancedAnalytics: true,
+      multiLocation: false,
+      apiAccess: false,
+      prioritySupport: false,
+      prescriptionManagement: true,
+      customerManagement: true,
+      expiryAlerts: true,
+    },
+    PROFESSIONAL: {
+      maxUsers: 10,
+      maxProducts: 2000,
+      salesTracking: true,
+      inventoryManagement: true,
+      basicReports: true,
+      advancedAnalytics: true,
+      multiLocation: true,
+      maxLocations: 3,
+      apiAccess: true,
+      prioritySupport: true,
+      prescriptionManagement: true,
+      customerManagement: true,
+      expiryAlerts: true,
+      purchaseOrders: true,
+      supplierManagement: true,
+      cashReconciliation: true,
+    },
+    ENTERPRISE: {
+      maxUsers: -1, // Unlimited
+      maxProducts: -1,
+      salesTracking: true,
+      inventoryManagement: true,
+      basicReports: true,
+      advancedAnalytics: true,
+      multiLocation: true,
+      maxLocations: -1,
+      apiAccess: true,
+      prioritySupport: true,
+      dedicatedSupport: true,
+      prescriptionManagement: true,
+      customerManagement: true,
+      expiryAlerts: true,
+      purchaseOrders: true,
+      supplierManagement: true,
+      cashReconciliation: true,
+      customIntegrations: true,
+      whiteLabeling: true,
+      auditTrail: true,
+    },
+  };
+
+  return features[tier];
+}
+
+export default {
+  getLicenses,
+  getLicense,
+  generateLicense,
+  generateBulkLicenses,
+  updateLicense,
+  revokeLicense,
+  deleteLicense,
+  getLicenseStats,
+};

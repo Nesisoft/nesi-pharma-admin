@@ -1,0 +1,330 @@
+import { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { useMutation, useQuery } from '@tanstack/react-query';
+import api, { getErrorMessage } from '@/lib/api';
+import LoadingSpinner from '@/components/ui/LoadingSpinner';
+import toast from 'react-hot-toast';
+import { ArrowLeftIcon, KeyIcon, ClipboardDocumentIcon } from '@heroicons/react/24/outline';
+import clsx from 'clsx';
+
+interface Pharmacy {
+  id: string;
+  name: string;
+  email: string;
+}
+
+export default function GenerateLicensePage() {
+  const navigate = useNavigate();
+  const [tier, setTier] = useState<'STANDARD' | 'PROFESSIONAL' | 'ENTERPRISE'>('STANDARD');
+  const [pharmacyId, setPharmacyId] = useState('');
+  const [durationDays, setDurationDays] = useState(365);
+  const [maxActivations, setMaxActivations] = useState(1);
+  const [notes, setNotes] = useState('');
+  const [bulkMode, setBulkMode] = useState(false);
+  const [bulkCount, setBulkCount] = useState(5);
+  const [generatedLicenses, setGeneratedLicenses] = useState<{ id: string; licenseKey: string; tier: string }[]>([]);
+
+  const { data: pharmacies } = useQuery<Pharmacy[]>({
+    queryKey: ['pharmacies-list'],
+    queryFn: async () => {
+      const response = await api.get('/pharmacies?limit=100');
+      return response.data.data;
+    },
+  });
+
+  const generateMutation = useMutation({
+    mutationFn: async (data: Record<string, unknown>) => {
+      const endpoint = bulkMode ? '/licenses/generate-bulk' : '/licenses/generate';
+      const response = await api.post(endpoint, data);
+      return response.data;
+    },
+    onSuccess: (data) => {
+      if (bulkMode) {
+        setGeneratedLicenses(data.data.licenses);
+        toast.success(`Generated ${data.data.count} licenses!`);
+      } else {
+        setGeneratedLicenses([{
+          id: data.data.id,
+          licenseKey: data.data.licenseKey,
+          tier: data.data.tier,
+        }]);
+        toast.success('License generated successfully!');
+      }
+    },
+    onError: (error) => {
+      toast.error(getErrorMessage(error));
+    },
+  });
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+
+    const data: Record<string, unknown> = {
+      tier,
+      durationDays,
+      maxActivations,
+      notes: notes || undefined,
+    };
+
+    if (bulkMode) {
+      data.count = bulkCount;
+    } else if (pharmacyId) {
+      data.pharmacyId = pharmacyId;
+    }
+
+    generateMutation.mutate(data);
+  };
+
+  const copyToClipboard = (text: string) => {
+    navigator.clipboard.writeText(text);
+    toast.success('Copied to clipboard!');
+  };
+
+  const copyAllLicenses = () => {
+    const text = generatedLicenses.map((l) => l.licenseKey).join('\n');
+    navigator.clipboard.writeText(text);
+    toast.success('All licenses copied!');
+  };
+
+  const tierInfo = {
+    STANDARD: {
+      name: 'Standard',
+      price: 'GHS 500/year',
+      description: 'Enhanced features for growing pharmacies',
+      color: 'border-blue-500 bg-blue-50',
+    },
+    PROFESSIONAL: {
+      name: 'Professional',
+      price: 'GHS 1,200/year',
+      description: 'Advanced features for established pharmacies',
+      color: 'border-green-500 bg-green-50',
+    },
+    ENTERPRISE: {
+      name: 'Enterprise',
+      price: 'GHS 3,000/year',
+      description: 'Full-featured solution for pharmacy chains',
+      color: 'border-purple-500 bg-purple-50',
+    },
+  };
+
+  return (
+    <div className="space-y-6">
+      {/* Header */}
+      <div className="flex items-center gap-4">
+        <button
+          onClick={() => navigate(-1)}
+          className="p-2 rounded-lg hover:bg-gray-100 transition-colors"
+        >
+          <ArrowLeftIcon className="h-5 w-5 text-gray-500" />
+        </button>
+        <div>
+          <h1 className="text-2xl font-bold text-gray-900">Generate License</h1>
+          <p className="mt-1 text-sm text-gray-500">
+            Create new license keys for pharmacies
+          </p>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        {/* Form */}
+        <div className="card">
+          <div className="card-header">
+            <h2 className="text-lg font-medium text-gray-900">License Details</h2>
+          </div>
+          <form onSubmit={handleSubmit} className="card-body space-y-6">
+            {/* Bulk Mode Toggle */}
+            <div className="flex items-center justify-between p-4 bg-gray-50 rounded-lg">
+              <div>
+                <p className="font-medium text-gray-900">Bulk Generation</p>
+                <p className="text-sm text-gray-500">Generate multiple licenses at once</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setBulkMode(!bulkMode)}
+                className={clsx(
+                  'relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none',
+                  bulkMode ? 'bg-primary-600' : 'bg-gray-200'
+                )}
+              >
+                <span
+                  className={clsx(
+                    'pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out',
+                    bulkMode ? 'translate-x-5' : 'translate-x-0'
+                  )}
+                />
+              </button>
+            </div>
+
+            {/* Tier Selection */}
+            <div>
+              <label className="label">License Tier</label>
+              <div className="grid grid-cols-1 gap-3 mt-2">
+                {(['STANDARD', 'PROFESSIONAL', 'ENTERPRISE'] as const).map((t) => (
+                  <button
+                    key={t}
+                    type="button"
+                    onClick={() => setTier(t)}
+                    className={clsx(
+                      'p-4 rounded-lg border-2 text-left transition-colors',
+                      tier === t ? tierInfo[t].color : 'border-gray-200 hover:border-gray-300'
+                    )}
+                  >
+                    <div className="flex justify-between items-start">
+                      <div>
+                        <p className="font-medium text-gray-900">{tierInfo[t].name}</p>
+                        <p className="text-sm text-gray-500">{tierInfo[t].description}</p>
+                      </div>
+                      <span className="text-sm font-medium text-gray-900">{tierInfo[t].price}</span>
+                    </div>
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Bulk Count */}
+            {bulkMode && (
+              <div>
+                <label className="label">Number of Licenses</label>
+                <input
+                  type="number"
+                  min={1}
+                  max={100}
+                  value={bulkCount}
+                  onChange={(e) => setBulkCount(parseInt(e.target.value) || 1)}
+                  className="input"
+                />
+                <p className="mt-1 text-sm text-gray-500">Maximum 100 licenses per batch</p>
+              </div>
+            )}
+
+            {/* Pharmacy Selection (single mode only) */}
+            {!bulkMode && (
+              <div>
+                <label className="label">Assign to Pharmacy (Optional)</label>
+                <select
+                  value={pharmacyId}
+                  onChange={(e) => setPharmacyId(e.target.value)}
+                  className="input"
+                >
+                  <option value="">No assignment (generate unassigned)</option>
+                  {pharmacies?.map((pharmacy) => (
+                    <option key={pharmacy.id} value={pharmacy.id}>
+                      {pharmacy.name} ({pharmacy.email})
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
+
+            {/* Duration */}
+            <div>
+              <label className="label">License Duration (Days)</label>
+              <input
+                type="number"
+                min={30}
+                max={3650}
+                value={durationDays}
+                onChange={(e) => setDurationDays(parseInt(e.target.value) || 365)}
+                className="input"
+              />
+            </div>
+
+            {/* Max Activations */}
+            <div>
+              <label className="label">Maximum Activations</label>
+              <input
+                type="number"
+                min={1}
+                max={100}
+                value={maxActivations}
+                onChange={(e) => setMaxActivations(parseInt(e.target.value) || 1)}
+                className="input"
+              />
+              <p className="mt-1 text-sm text-gray-500">
+                Number of devices that can activate this license
+              </p>
+            </div>
+
+            {/* Notes */}
+            <div>
+              <label className="label">Notes (Optional)</label>
+              <textarea
+                value={notes}
+                onChange={(e) => setNotes(e.target.value)}
+                rows={3}
+                className="input"
+                placeholder="Internal notes about this license..."
+              />
+            </div>
+
+            <button
+              type="submit"
+              disabled={generateMutation.isPending}
+              className="btn btn-primary w-full py-3"
+            >
+              {generateMutation.isPending ? (
+                <>
+                  <LoadingSpinner size="sm" className="mr-2" />
+                  Generating...
+                </>
+              ) : (
+                <>
+                  <KeyIcon className="h-5 w-5 mr-2" />
+                  Generate {bulkMode ? `${bulkCount} Licenses` : 'License'}
+                </>
+              )}
+            </button>
+          </form>
+        </div>
+
+        {/* Generated Licenses */}
+        <div className="card">
+          <div className="card-header flex items-center justify-between">
+            <h2 className="text-lg font-medium text-gray-900">Generated Licenses</h2>
+            {generatedLicenses.length > 1 && (
+              <button
+                onClick={copyAllLicenses}
+                className="btn btn-secondary text-sm"
+              >
+                <ClipboardDocumentIcon className="h-4 w-4 mr-1" />
+                Copy All
+              </button>
+            )}
+          </div>
+          <div className="card-body">
+            {generatedLicenses.length === 0 ? (
+              <div className="text-center py-12">
+                <KeyIcon className="mx-auto h-12 w-12 text-gray-300" />
+                <p className="mt-4 text-gray-500">
+                  Generated licenses will appear here
+                </p>
+              </div>
+            ) : (
+              <div className="space-y-3">
+                {generatedLicenses.map((license) => (
+                  <div
+                    key={license.id}
+                    className="flex items-center justify-between p-3 bg-gray-50 rounded-lg"
+                  >
+                    <div>
+                      <code className="text-sm font-mono font-medium">
+                        {license.licenseKey}
+                      </code>
+                      <p className="text-xs text-gray-500 mt-1">{license.tier}</p>
+                    </div>
+                    <button
+                      onClick={() => copyToClipboard(license.licenseKey)}
+                      className="p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-200 rounded"
+                    >
+                      <ClipboardDocumentIcon className="h-5 w-5" />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}

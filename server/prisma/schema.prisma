@@ -1,0 +1,280 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ==================== ENUMS ====================
+
+enum LicenseTier {
+  BASIC
+  STANDARD
+  PROFESSIONAL
+  ENTERPRISE
+}
+
+enum LicenseStatus {
+  ACTIVE
+  INACTIVE
+  EXPIRED
+  REVOKED
+  SUSPENDED
+}
+
+enum AdminRole {
+  SUPER_ADMIN
+  ADMIN
+  SUPPORT
+  VIEWER
+}
+
+enum PharmacyStatus {
+  PENDING
+  ACTIVE
+  SUSPENDED
+  DEACTIVATED
+}
+
+enum AuditAction {
+  CREATE
+  UPDATE
+  DELETE
+  ACTIVATE
+  DEACTIVATE
+  REVOKE
+  LOGIN
+  LOGOUT
+  VERIFY
+  GENERATE
+}
+
+// ==================== ADMIN USERS ====================
+
+model AdminUser {
+  id            String    @id @default(uuid())
+  email         String    @unique
+  password      String
+  firstName     String
+  lastName      String
+  role          AdminRole @default(ADMIN)
+  isActive      Boolean   @default(true)
+  lastLogin     DateTime?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  // Relations
+  auditLogs     AuditLog[]
+  generatedLicenses License[] @relation("GeneratedBy")
+
+  @@map("admin_users")
+}
+
+// ==================== PHARMACIES ====================
+
+model Pharmacy {
+  id              String         @id @default(uuid())
+  name            String
+  email           String         @unique
+  phone           String?
+  address         String?
+  city            String?
+  region          String?
+  country         String         @default("Ghana")
+  registrationNumber String?     @unique
+  status          PharmacyStatus @default(PENDING)
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
+
+  // Relations
+  licenses        License[]
+  activations     LicenseActivation[]
+
+  @@map("pharmacies")
+}
+
+// ==================== LICENSES ====================
+
+model License {
+  id              String        @id @default(uuid())
+  licenseKey      String        @unique
+  tier            LicenseTier
+  status          LicenseStatus @default(INACTIVE)
+
+  // Validity
+  validFrom       DateTime?
+  validUntil      DateTime?
+  durationDays    Int           @default(365) // License duration in days
+
+  // Limits
+  maxActivations  Int           @default(1)
+  currentActivations Int        @default(0)
+
+  // Pharmacy association
+  pharmacyId      String?
+  pharmacy        Pharmacy?     @relation(fields: [pharmacyId], references: [id])
+
+  // Features (JSON for flexibility)
+  features        Json?
+
+  // Metadata
+  notes           String?
+  generatedById   String?
+  generatedBy     AdminUser?    @relation("GeneratedBy", fields: [generatedById], references: [id])
+
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+  activatedAt     DateTime?
+  expiresAt       DateTime?
+
+  // Relations
+  activations     LicenseActivation[]
+  verifications   LicenseVerification[]
+
+  @@index([licenseKey])
+  @@index([tier])
+  @@index([status])
+  @@map("licenses")
+}
+
+// ==================== LICENSE ACTIVATIONS ====================
+
+model LicenseActivation {
+  id              String    @id @default(uuid())
+  licenseId       String
+  license         License   @relation(fields: [licenseId], references: [id])
+  pharmacyId      String?
+  pharmacy        Pharmacy? @relation(fields: [pharmacyId], references: [id])
+
+  // Device/Installation info
+  deviceId        String?
+  deviceName      String?
+  deviceFingerprint String?
+  ipAddress       String?
+  userAgent       String?
+
+  // Status
+  isActive        Boolean   @default(true)
+  activatedAt     DateTime  @default(now())
+  deactivatedAt   DateTime?
+
+  @@map("license_activations")
+}
+
+// ==================== LICENSE VERIFICATIONS ====================
+
+model LicenseVerification {
+  id              String    @id @default(uuid())
+  licenseId       String
+  license         License   @relation(fields: [licenseId], references: [id])
+
+  // Request info
+  ipAddress       String?
+  userAgent       String?
+  deviceId        String?
+
+  // Result
+  isValid         Boolean
+  message         String?
+
+  verifiedAt      DateTime  @default(now())
+
+  @@map("license_verifications")
+}
+
+// ==================== LICENSE TIERS CONFIGURATION ====================
+
+model LicenseTierConfig {
+  id              String      @id @default(uuid())
+  tier            LicenseTier @unique
+  name            String
+  description     String?
+  price           Decimal     @db.Decimal(10, 2)
+  currency        String      @default("GHS")
+  durationDays    Int         @default(365)
+
+  // Feature flags
+  features        Json
+
+  // Limits
+  maxUsers        Int?
+  maxProducts     Int?
+  maxTransactions Int?
+
+  isActive        Boolean     @default(true)
+  createdAt       DateTime    @default(now())
+  updatedAt       DateTime    @updatedAt
+
+  @@map("license_tier_configs")
+}
+
+// ==================== AUDIT LOGS ====================
+
+model AuditLog {
+  id              String      @id @default(uuid())
+  action          AuditAction
+  entityType      String      // 'License', 'Pharmacy', 'AdminUser', etc.
+  entityId        String?
+
+  // Actor
+  adminUserId     String?
+  adminUser       AdminUser?  @relation(fields: [adminUserId], references: [id])
+
+  // Details
+  previousValue   Json?
+  newValue        Json?
+  description     String?
+  ipAddress       String?
+  userAgent       String?
+
+  createdAt       DateTime    @default(now())
+
+  @@index([entityType, entityId])
+  @@index([adminUserId])
+  @@index([createdAt])
+  @@map("audit_logs")
+}
+
+// ==================== SYSTEM SETTINGS ====================
+
+model SystemSetting {
+  id              String    @id @default(uuid())
+  key             String    @unique
+  value           String
+  description     String?
+  isEncrypted     Boolean   @default(false)
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  @@map("system_settings")
+}
+
+// ==================== API KEYS ====================
+
+model ApiKey {
+  id              String    @id @default(uuid())
+  name            String
+  key             String    @unique
+  hashedKey       String
+
+  // Permissions
+  permissions     Json?
+
+  // Rate limiting
+  rateLimit       Int       @default(1000) // requests per hour
+
+  // Status
+  isActive        Boolean   @default(true)
+  lastUsedAt      DateTime?
+  expiresAt       DateTime?
+
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  @@map("api_keys")
+}
