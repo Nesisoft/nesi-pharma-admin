@@ -21,18 +21,21 @@ const publicCorsOptions: cors.CorsOptions = {
   allowedHeaders: ['Content-Type', 'X-License-Key', 'X-Device-Id'],
 };
 
-// Apply permissive CORS to public routes BEFORE the general CORS middleware
-app.use('/api/public', cors(publicCorsOptions));
-
 // CORS configuration for admin routes (restricted to admin frontend origin)
-app.use(
-  cors({
-    origin: config.cors.origin,
-    credentials: true,
-    methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization'],
-  })
-);
+const adminCorsOptions: cors.CorsOptions = {
+  origin: config.cors.origin,
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization'],
+};
+
+// Apply CORS based on route - public routes get permissive CORS, admin routes get restricted
+app.use((req, res, next) => {
+  if (req.path.startsWith('/api/public')) {
+    return cors(publicCorsOptions)(req, res, next);
+  }
+  return cors(adminCorsOptions)(req, res, next);
+});
 
 // Rate limiting
 const limiter = rateLimit({
