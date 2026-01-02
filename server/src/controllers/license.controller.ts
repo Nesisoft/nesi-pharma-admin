@@ -127,8 +127,8 @@ export async function generateLicense(req: Request, res: Response): Promise<void
     const {
       tier,
       pharmacyId,
-      durationDays = 365,
-      maxActivations = 1,
+      durationDays,
+      maxActivations,
       notes,
       features,
     } = req.body;
@@ -142,6 +142,15 @@ export async function generateLicense(req: Request, res: Response): Promise<void
       sendError(res, 'Cannot generate license for BASIC tier (free tier)', 400);
       return;
     }
+
+    // Get tier configuration for defaults
+    const tierConfig = await prisma.licenseTierConfig.findUnique({
+      where: { tier },
+    });
+
+    // Use tier config defaults if not explicitly provided
+    const licenseDurationDays = durationDays ?? tierConfig?.durationDays ?? 365;
+    const licenseMaxActivations = maxActivations ?? tierConfig?.maxActivations ?? 1;
 
     // Generate unique license key
     let licenseKey = generateLicenseKey(tier);
@@ -168,8 +177,8 @@ export async function generateLicense(req: Request, res: Response): Promise<void
         licenseKey,
         tier,
         status: LicenseStatus.INACTIVE,
-        durationDays,
-        maxActivations,
+        durationDays: licenseDurationDays,
+        maxActivations: licenseMaxActivations,
         pharmacyId: pharmacyId || null,
         notes,
         features: features || getDefaultFeatures(tier),
@@ -215,8 +224,8 @@ export async function generateBulkLicenses(req: Request, res: Response): Promise
     const {
       tier,
       count,
-      durationDays = 365,
-      maxActivations = 1,
+      durationDays,
+      maxActivations,
       notes,
     } = req.body;
 
@@ -236,6 +245,15 @@ export async function generateBulkLicenses(req: Request, res: Response): Promise
       return;
     }
 
+    // Get tier configuration for defaults
+    const tierConfig = await prisma.licenseTierConfig.findUnique({
+      where: { tier },
+    });
+
+    // Use tier config defaults if not explicitly provided
+    const licenseDurationDays = durationDays ?? tierConfig?.durationDays ?? 365;
+    const licenseMaxActivations = maxActivations ?? tierConfig?.maxActivations ?? 1;
+
     // Generate unique keys
     const licenseKeys = generateBulkLicenseKeys(tier, requestedCount);
     const features = getDefaultFeatures(tier);
@@ -248,8 +266,8 @@ export async function generateBulkLicenses(req: Request, res: Response): Promise
             licenseKey,
             tier,
             status: LicenseStatus.INACTIVE,
-            durationDays,
-            maxActivations,
+            durationDays: licenseDurationDays,
+            maxActivations: licenseMaxActivations,
             notes,
             features,
             generatedById: req.user?.id,
