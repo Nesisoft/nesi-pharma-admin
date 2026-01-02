@@ -13,7 +13,18 @@ const app = express();
 // Security middleware
 app.use(helmet());
 
-// CORS configuration
+// CORS configuration for public license endpoints (allow any origin)
+// These endpoints are called by pharmacy client applications from various domains
+const publicCorsOptions: cors.CorsOptions = {
+  origin: '*', // Allow any origin for public endpoints
+  methods: ['GET', 'POST', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'X-License-Key', 'X-Device-Id'],
+};
+
+// Apply permissive CORS to public routes BEFORE the general CORS middleware
+app.use('/api/public', cors(publicCorsOptions));
+
+// CORS configuration for admin routes (restricted to admin frontend origin)
 app.use(
   cors({
     origin: config.cors.origin,
