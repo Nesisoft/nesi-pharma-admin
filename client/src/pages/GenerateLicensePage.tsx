@@ -15,7 +15,7 @@ interface Pharmacy {
 
 interface TierConfig {
   id: string;
-  tier: string;
+  code: string;
   name: string;
   description: string;
   price: number;
@@ -24,6 +24,7 @@ interface TierConfig {
   maxUsers: number | null;
   maxBranches: number | null;
   maxActivations: number | null;
+  color: string | null;
   isActive: boolean;
 }
 
@@ -35,7 +36,7 @@ const tierColors: Record<string, string> = {
 
 export default function GenerateLicensePage() {
   const navigate = useNavigate();
-  const [tier, setTier] = useState<'STANDARD' | 'PROFESSIONAL' | 'ENTERPRISE'>('STANDARD');
+  const [selectedTierCode, setSelectedTierCode] = useState<string>('STANDARD');
   const [pharmacyId, setPharmacyId] = useState('');
   const [durationDays, setDurationDays] = useState(365);
   const [maxActivations, setMaxActivations] = useState(1);
@@ -64,13 +65,13 @@ export default function GenerateLicensePage() {
   // Update defaults when tier changes
   useEffect(() => {
     if (tierConfigs) {
-      const selectedTier = tierConfigs.find((t) => t.tier === tier);
+      const selectedTier = tierConfigs.find((t) => t.code === selectedTierCode);
       if (selectedTier) {
         setDurationDays(selectedTier.durationDays || 365);
         setMaxActivations(selectedTier.maxActivations || 1);
       }
     }
-  }, [tier, tierConfigs]);
+  }, [selectedTierCode, tierConfigs]);
 
   const generateMutation = useMutation({
     mutationFn: async (data: Record<string, unknown>) => {
@@ -100,7 +101,8 @@ export default function GenerateLicensePage() {
     e.preventDefault();
 
     const data: Record<string, unknown> = {
-      tier,
+      tier: selectedTierCode,
+      tierCode: selectedTierCode,
       durationDays,
       maxActivations,
       notes: notes || undefined,
@@ -127,7 +129,7 @@ export default function GenerateLicensePage() {
   };
 
   // Filter to only show paid tiers (not BASIC)
-  const paidTiers = tierConfigs?.filter((t) => t.tier !== 'BASIC' && t.isActive) || [];
+  const paidTiers = tierConfigs?.filter((t) => t.code !== 'BASIC' && t.isActive) || [];
 
   const formatPrice = (price: number, currency: string) => {
     return `${currency} ${price.toLocaleString()}/year`;
@@ -196,13 +198,16 @@ export default function GenerateLicensePage() {
               <div className="grid grid-cols-1 gap-3 mt-2">
                 {paidTiers.map((t) => (
                   <button
-                    key={t.tier}
+                    key={t.code}
                     type="button"
-                    onClick={() => setTier(t.tier as 'STANDARD' | 'PROFESSIONAL' | 'ENTERPRISE')}
+                    onClick={() => setSelectedTierCode(t.code)}
                     className={clsx(
                       'p-4 rounded-lg border-2 text-left transition-colors',
-                      tier === t.tier ? tierColors[t.tier] || 'border-gray-500 bg-gray-50' : 'border-gray-200 hover:border-gray-300'
+                      selectedTierCode === t.code
+                        ? (t.color ? `border-2` : tierColors[t.code] || 'border-gray-500 bg-gray-50')
+                        : 'border-gray-200 hover:border-gray-300'
                     )}
+                    style={selectedTierCode === t.code && t.color ? { borderColor: t.color, backgroundColor: `${t.color}10` } : {}}
                   >
                     <div className="flex justify-between items-start">
                       <div>
@@ -282,7 +287,7 @@ export default function GenerateLicensePage() {
                 className="input"
               />
               <p className="mt-1 text-sm text-gray-500">
-                Default from tier: {tierConfigs?.find((t) => t.tier === tier)?.maxActivations || 1} activations
+                Default from tier: {tierConfigs?.find((t) => t.code === selectedTierCode)?.maxActivations || 1} activations
               </p>
             </div>
 
