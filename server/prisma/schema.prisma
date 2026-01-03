@@ -19,7 +19,6 @@ enum LicenseTier {
   STANDARD
   PROFESSIONAL
   ENTERPRISE
-  CUSTOM  // Used for custom tiers
 }
 
 enum LicenseStatus {
@@ -106,7 +105,7 @@ model Pharmacy {
 model License {
   id              String        @id @default(uuid())
   licenseKey      String        @unique
-  tier            LicenseTier   @default(CUSTOM)  // Kept for backwards compatibility
+  tier            LicenseTier   @default(BASIC)  // Kept for backwards compatibility, use tierCode for actual tier
   tierCode        String?       // References LicenseTierConfig.code
   tierConfig      LicenseTierConfig? @relation(fields: [tierCode], references: [code])
   status          LicenseStatus @default(INACTIVE)
