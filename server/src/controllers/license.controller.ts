@@ -538,147 +538,86 @@ export async function getLicenseStats(req: Request, res: Response): Promise<void
   }
 }
 
+const BASE_FEATURES = {
+  stockAdjustments: true,
+};
+
+const STANDARD_FEATURES = {
+  barcodeScanning: true,
+  multiUser: true,
+  cartHolding: true,
+  cashReconciliation: true,
+};
+
+const PROFESSIONAL_FEATURES = {
+  customers: true,
+  prescriptions: true,
+  notifications: true,
+  suppliers: true,
+  supplierInvoicing: true,
+  expiryAlerts: true,
+  lowStockAlerts: true,
+  purchaseOrders: true,
+  goodsReceiving: true,
+  dashboardAnalytics: true,
+  salesRefund: true,
+  fefoRecommendations: true,
+  inventoryReports: true,
+  periodComparison: true,
+  salesAnalytics: true,
+  backupRestore: true,
+  advancedReporting: true,
+  auditLog: true,
+  apiAccess: true,
+  prioritySupport: true,
+};
+
+
 /**
  * Get default features for a tier
  * These feature keys map directly to the frontend's feature configuration
  */
-function getDefaultFeatures(tier: LicenseTier): Record<string, unknown> {
-  const features: Record<LicenseTier, Record<string, unknown>> = {
-    BASIC: {
-      // Limits
-      maxUsers: 1,
-      maxBranches: 1,
-      maxProducts: 500,
-      // Features - Basic only gets stockAdjustments
-      stockAdjustments: true,
-      // All other features disabled for Basic
-      customers: false,
-      prescriptions: false,
-      suppliers: false,
-      barcodeScanning: false,
-      multiUser: false,
-      advancedReporting: false,
-      auditLog: false,
-      notifications: false,
-      cartHolding: false,
-      cashReconciliation: false,
-      expiryAlerts: false,
-      lowStockAlerts: false,
-      purchaseOrders: false,
-      goodsReceiving: false,
-      supplierInvoicing: false,
-      dashboardAnalytics: false,
-      salesRefund: false,
-      fefoRecommendations: false,
-      inventoryReports: false,
-      periodComparison: false,
-      salesAnalytics: false,
-      backupRestore: false,
-      apiAccess: false,
-    },
-    STANDARD: {
-      // Limits
-      maxUsers: 3,
-      maxBranches: 1,
-      maxProducts: 5000,
-      // Features enabled for Standard
-      stockAdjustments: true,
-      customers: true,
-      prescriptions: true,
-      suppliers: true,
-      barcodeScanning: true,
-      multiUser: true,
-      notifications: true,
-      cartHolding: true,
-      cashReconciliation: true,
-      expiryAlerts: true,
-      lowStockAlerts: true,
-      purchaseOrders: true,
-      goodsReceiving: true,
-      supplierInvoicing: true,
-      dashboardAnalytics: true,
-      salesRefund: true,
-      fefoRecommendations: true,
-      inventoryReports: true,
-      periodComparison: true,
-      salesAnalytics: true,
-      backupRestore: true,
-      // Not included in Standard
-      advancedReporting: false,
-      auditLog: false,
-      apiAccess: false,
-    },
-    PROFESSIONAL: {
-      // Limits
-      maxUsers: 10,
-      maxBranches: 3,
-      maxProducts: -1, // Unlimited
-      // All features enabled
-      stockAdjustments: true,
-      customers: true,
-      prescriptions: true,
-      suppliers: true,
-      barcodeScanning: true,
-      multiUser: true,
-      advancedReporting: true,
-      auditLog: true,
-      notifications: true,
-      cartHolding: true,
-      cashReconciliation: true,
-      expiryAlerts: true,
-      lowStockAlerts: true,
-      purchaseOrders: true,
-      goodsReceiving: true,
-      supplierInvoicing: true,
-      dashboardAnalytics: true,
-      salesRefund: true,
-      fefoRecommendations: true,
-      inventoryReports: true,
-      periodComparison: true,
-      salesAnalytics: true,
-      backupRestore: true,
-      apiAccess: true,
-      prioritySupport: true,
-    },
-    ENTERPRISE: {
-      // Limits - All unlimited
-      maxUsers: -1,
-      maxBranches: -1,
-      maxProducts: -1,
-      // All features enabled
-      stockAdjustments: true,
-      customers: true,
-      prescriptions: true,
-      suppliers: true,
-      barcodeScanning: true,
-      multiUser: true,
-      advancedReporting: true,
-      auditLog: true,
-      notifications: true,
-      cartHolding: true,
-      cashReconciliation: true,
-      expiryAlerts: true,
-      lowStockAlerts: true,
-      purchaseOrders: true,
-      goodsReceiving: true,
-      supplierInvoicing: true,
-      dashboardAnalytics: true,
-      salesRefund: true,
-      fefoRecommendations: true,
-      inventoryReports: true,
-      periodComparison: true,
-      salesAnalytics: true,
-      backupRestore: true,
-      apiAccess: true,
-      prioritySupport: true,
-      dedicatedSupport: true,
-      customIntegrations: true,
-      whiteLabeling: true,
-    },
-  };
+function getDefaultFeatures(tier: LicenseTier) {
+  switch (tier) {
+    case 'BASIC':
+      return {
+        maxUsers: 1,
+        maxBranches: 1,
+        maxProducts: 500,
+        ...BASE_FEATURES,
+      };
 
-  return features[tier];
+    case 'STANDARD':
+      return {
+        maxUsers: 3,
+        maxBranches: 1,
+        maxProducts: 5000,
+        ...BASE_FEATURES,
+        ...STANDARD_FEATURES,
+      };
+
+    case 'PROFESSIONAL':
+      return {
+        maxUsers: 10,
+        maxBranches: 3,
+        maxProducts: -1,
+        ...BASE_FEATURES,
+        ...STANDARD_FEATURES,
+        ...PROFESSIONAL_FEATURES,
+      };
+
+    case 'ENTERPRISE':
+      return {
+        maxUsers: -1,
+        maxBranches: -1,
+        maxProducts: -1,
+        ...BASE_FEATURES,
+        ...STANDARD_FEATURES,
+        ...PROFESSIONAL_FEATURES,
+      };
+  }
 }
+
 
 export default {
   getLicenses,
