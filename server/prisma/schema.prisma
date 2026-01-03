@@ -12,11 +12,14 @@ datasource db {
 
 // ==================== ENUMS ====================
 
+// Note: LicenseTier enum kept for backwards compatibility with existing licenses
+// New tiers use the string-based code field in LicenseTierConfig
 enum LicenseTier {
   BASIC
   STANDARD
   PROFESSIONAL
   ENTERPRISE
+  CUSTOM  // Used for custom tiers
 }
 
 enum LicenseStatus {
@@ -103,7 +106,9 @@ model Pharmacy {
 model License {
   id              String        @id @default(uuid())
   licenseKey      String        @unique
-  tier            LicenseTier
+  tier            LicenseTier   @default(CUSTOM)  // Kept for backwards compatibility
+  tierCode        String?       // References LicenseTierConfig.code
+  tierConfig      LicenseTierConfig? @relation(fields: [tierCode], references: [code])
   status          LicenseStatus @default(INACTIVE)
 
   // Validity
@@ -119,7 +124,7 @@ model License {
   pharmacyId      String?
   pharmacy        Pharmacy?     @relation(fields: [pharmacyId], references: [id])
 
-  // Features (JSON for flexibility)
+  // Features (JSON for flexibility - cached from tier at activation time)
   features        Json?
 
   // Metadata
@@ -138,6 +143,7 @@ model License {
 
   @@index([licenseKey])
   @@index([tier])
+  @@index([tierCode])
   @@index([status])
   @@map("licenses")
 }
@@ -191,7 +197,7 @@ model LicenseVerification {
 
 model LicenseTierConfig {
   id              String      @id @default(uuid())
-  tier            LicenseTier @unique
+  code            String      @unique  // e.g., "BASIC", "STANDARD", "GOLD_TIER"
   name            String
   description     String?
   price           Decimal     @db.Decimal(10, 2)
@@ -205,6 +211,11 @@ model LicenseTierConfig {
   maxBranches     Int?        // Maximum pharmacy branches (null = unlimited)
   maxActivations  Int?        // Maximum device activations per license (null = unlimited)
 
+  // Management
+  isDefault       Boolean     @default(false)  // True for predefined tiers (BASIC, STANDARD, etc.)
+  displayOrder    Int         @default(0)      // For ordering in UI
+  color           String?                      // Optional color code for UI (e.g., "#3B82F6")
+
   isActive        Boolean     @default(true)
   archivedAt      DateTime?   // Soft delete
   createdAt       DateTime    @default(now())
@@ -212,6 +223,7 @@ model LicenseTierConfig {
 
   // Relations
   tierFeatures    TierFeature[]
+  licenses        License[]
 
   @@map("license_tier_configs")
 }

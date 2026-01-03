@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import api, { getErrorMessage } from '@/lib/api';
 import LoadingSpinner from '@/components/ui/LoadingSpinner';
@@ -17,6 +17,10 @@ import {
   BuildingStorefrontIcon,
   ComputerDesktopIcon,
   PuzzlePieceIcon,
+  PlusIcon,
+  TrashIcon,
+  ArchiveBoxIcon,
+  ArchiveBoxArrowDownIcon,
 } from '@heroicons/react/24/outline';
 
 interface Feature {
@@ -32,7 +36,7 @@ interface Feature {
 
 interface TierConfig {
   id: string;
-  tier: string;
+  code: string;
   name: string;
   description: string;
   price: number;
@@ -44,7 +48,11 @@ interface TierConfig {
   maxTransactions: number | null;
   maxBranches: number | null;
   maxActivations: number | null;
+  isDefault: boolean;
+  displayOrder: number;
+  color: string | null;
   isActive: boolean;
+  archivedAt: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -54,28 +62,58 @@ interface TierFeaturesResponse {
   features: Feature[];
 }
 
-const tierColors: Record<string, string> = {
-  BASIC: 'border-gray-300 bg-gray-50',
-  STANDARD: 'border-blue-300 bg-blue-50',
-  PROFESSIONAL: 'border-green-300 bg-green-50',
-  ENTERPRISE: 'border-purple-300 bg-purple-50',
-};
+interface CreateTierForm {
+  code: string;
+  name: string;
+  description: string;
+  price: number;
+  currency: string;
+  durationDays: number;
+  maxUsers: number | null;
+  maxProducts: number | null;
+  maxBranches: number | null;
+  maxActivations: number | null;
+  color: string;
+}
 
-const tierBadgeColors: Record<string, string> = {
-  BASIC: 'bg-gray-100 text-gray-800',
-  STANDARD: 'bg-blue-100 text-blue-800',
-  PROFESSIONAL: 'bg-green-100 text-green-800',
-  ENTERPRISE: 'bg-purple-100 text-purple-800',
-};
+const defaultColors = [
+  { name: 'Gray', value: '#6B7280' },
+  { name: 'Blue', value: '#3B82F6' },
+  { name: 'Green', value: '#10B981' },
+  { name: 'Purple', value: '#8B5CF6' },
+  { name: 'Red', value: '#EF4444' },
+  { name: 'Yellow', value: '#F59E0B' },
+  { name: 'Pink', value: '#EC4899' },
+  { name: 'Indigo', value: '#6366F1' },
+];
 
 const categoryColors: Record<string, string> = {
   core: 'bg-blue-50 border-blue-200',
   sales: 'bg-green-50 border-green-200',
   inventory: 'bg-yellow-50 border-yellow-200',
   reports: 'bg-purple-50 border-purple-200',
+  reporting: 'bg-purple-50 border-purple-200',
   customers: 'bg-pink-50 border-pink-200',
   suppliers: 'bg-orange-50 border-orange-200',
+  pharmacy: 'bg-teal-50 border-teal-200',
+  system: 'bg-slate-50 border-slate-200',
+  enterprise: 'bg-indigo-50 border-indigo-200',
+  support: 'bg-rose-50 border-rose-200',
   general: 'bg-gray-50 border-gray-200',
+};
+
+const initialCreateForm: CreateTierForm = {
+  code: '',
+  name: '',
+  description: '',
+  price: 0,
+  currency: 'GHS',
+  durationDays: 365,
+  maxUsers: null,
+  maxProducts: null,
+  maxBranches: null,
+  maxActivations: null,
+  color: '#3B82F6',
 };
 
 export default function TierConfigsPage() {
@@ -85,6 +123,9 @@ export default function TierConfigsPage() {
   const [editForm, setEditForm] = useState<Partial<TierConfig>>({});
   const [featureModalTier, setFeatureModalTier] = useState<string | null>(null);
   const [selectedFeatures, setSelectedFeatures] = useState<string[]>([]);
+  const [showCreateModal, setShowCreateModal] = useState(false);
+  const [createForm, setCreateForm] = useState<CreateTierForm>(initialCreateForm);
+  const [deleteConfirmTier, setDeleteConfirmTier] = useState<TierConfig | null>(null);
 
   const isSuperAdmin = user?.role === 'SUPER_ADMIN';
 
@@ -106,15 +147,74 @@ export default function TierConfigsPage() {
     enabled: !!featureModalTier,
   });
 
+  const createMutation = useMutation({
+    mutationFn: async (data: CreateTierForm) => {
+      const response = await api.post('/tier-configs', data);
+      return response.data;
+    },
+    onSuccess: () => {
+      toast.success('Tier created successfully!');
+      queryClient.invalidateQueries({ queryKey: ['tier-configs'] });
+      setShowCreateModal(false);
+      setCreateForm(initialCreateForm);
+    },
+    onError: (error) => {
+      toast.error(getErrorMessage(error));
+    },
+  });
+
   const updateMutation = useMutation({
-    mutationFn: async ({ tier, data }: { tier: string; data: Partial<TierConfig> }) => {
-      const response = await api.put(`/tier-configs/${tier}`, data);
+    mutationFn: async ({ code, data }: { code: string; data: Partial<TierConfig> }) => {
+      const response = await api.put(`/tier-configs/${code}`, data);
       return response.data;
     },
     onSuccess: () => {
       toast.success('Tier configuration updated!');
       queryClient.invalidateQueries({ queryKey: ['tier-configs'] });
       setEditingTier(null);
+    },
+    onError: (error) => {
+      toast.error(getErrorMessage(error));
+    },
+  });
+
+  const deleteMutation = useMutation({
+    mutationFn: async (code: string) => {
+      const response = await api.delete(`/tier-configs/${code}`);
+      return response.data;
+    },
+    onSuccess: () => {
+      toast.success('Tier deleted successfully!');
+      queryClient.invalidateQueries({ queryKey: ['tier-configs'] });
+      setDeleteConfirmTier(null);
+    },
+    onError: (error) => {
+      toast.error(getErrorMessage(error));
+    },
+  });
+
+  const archiveMutation = useMutation({
+    mutationFn: async (code: string) => {
+      const response = await api.post(`/tier-configs/${code}/archive`);
+      return response.data;
+    },
+    onSuccess: () => {
+      toast.success('Tier archived successfully!');
+      queryClient.invalidateQueries({ queryKey: ['tier-configs'] });
+    },
+    onError: (error) => {
+      toast.error(getErrorMessage(error));
+    },
+  });
+
+  const restoreMutation = useMutation({
+    mutationFn: async (code: string) => {
+      const response = await api.post(`/tier-configs/${code}/restore`);
+      return response.data;
+    },
+    onSuccess: () => {
+      toast.success('Tier restored successfully!');
+      queryClient.invalidateQueries({ queryKey: ['tier-configs'] });
     },
     onError: (error) => {
       toast.error(getErrorMessage(error));
@@ -136,8 +236,8 @@ export default function TierConfigsPage() {
   });
 
   const syncFeaturesMutation = useMutation({
-    mutationFn: async ({ tier, featureIds }: { tier: string; featureIds: string[] }) => {
-      const response = await api.post(`/tier-configs/${tier}/features/sync`, { featureIds });
+    mutationFn: async ({ code, featureIds }: { code: string; featureIds: string[] }) => {
+      const response = await api.post(`/tier-configs/${code}/features/sync`, { featureIds });
       return response.data;
     },
     onSuccess: () => {
@@ -152,7 +252,7 @@ export default function TierConfigsPage() {
   });
 
   const startEditing = (tier: TierConfig) => {
-    setEditingTier(tier.tier);
+    setEditingTier(tier.code);
     setEditForm({
       name: tier.name,
       description: tier.description,
@@ -163,6 +263,7 @@ export default function TierConfigsPage() {
       maxProducts: tier.maxProducts,
       maxBranches: tier.maxBranches,
       maxActivations: tier.maxActivations,
+      color: tier.color,
       isActive: tier.isActive,
     });
   };
@@ -172,8 +273,8 @@ export default function TierConfigsPage() {
     setEditForm({});
   };
 
-  const saveEditing = (tier: string) => {
-    updateMutation.mutate({ tier, data: editForm });
+  const saveEditing = (code: string) => {
+    updateMutation.mutate({ code, data: editForm });
   };
 
   const handleReset = () => {
@@ -182,8 +283,13 @@ export default function TierConfigsPage() {
     }
   };
 
-  const openFeatureModal = (tier: string) => {
-    setFeatureModalTier(tier);
+  const handleCreate = (e: React.FormEvent) => {
+    e.preventDefault();
+    createMutation.mutate(createForm);
+  };
+
+  const openFeatureModal = (code: string) => {
+    setFeatureModalTier(code);
     setSelectedFeatures([]);
   };
 
@@ -193,14 +299,14 @@ export default function TierConfigsPage() {
   };
 
   // Initialize selected features when tier features data loads
-  const initializeSelectedFeatures = () => {
+  useEffect(() => {
     if (tierFeatures?.features) {
       const enabledIds = tierFeatures.features
         .filter((f) => f.isEnabled)
         .map((f) => f.id);
       setSelectedFeatures(enabledIds);
     }
-  };
+  }, [tierFeatures]);
 
   // Toggle feature selection
   const toggleFeature = (featureId: string) => {
@@ -213,7 +319,7 @@ export default function TierConfigsPage() {
 
   const saveFeatures = () => {
     if (featureModalTier) {
-      syncFeaturesMutation.mutate({ tier: featureModalTier, featureIds: selectedFeatures });
+      syncFeaturesMutation.mutate({ code: featureModalTier, featureIds: selectedFeatures });
     }
   };
 
@@ -224,6 +330,20 @@ export default function TierConfigsPage() {
     acc[category].push(feature);
     return acc;
   }, {} as Record<string, Feature[]>);
+
+  const getTierBorderColor = (tier: TierConfig) => {
+    if (tier.color) {
+      return { borderColor: tier.color, backgroundColor: `${tier.color}10` };
+    }
+    return {};
+  };
+
+  const getTierBadgeStyle = (tier: TierConfig) => {
+    if (tier.color) {
+      return { backgroundColor: `${tier.color}20`, color: tier.color };
+    }
+    return {};
+  };
 
   if (isLoading) {
     return (
@@ -243,43 +363,60 @@ export default function TierConfigsPage() {
             Configure pricing, features, and limits for each license tier
           </p>
         </div>
-        {isSuperAdmin && (
-          <button
-            onClick={handleReset}
-            disabled={resetMutation.isPending}
-            className="btn btn-secondary"
-          >
-            <ArrowPathIcon className="h-5 w-5 mr-2" />
-            Reset to Defaults
-          </button>
-        )}
+        <div className="flex gap-2">
+          {isSuperAdmin && (
+            <>
+              <button
+                onClick={() => setShowCreateModal(true)}
+                className="btn btn-primary"
+              >
+                <PlusIcon className="h-5 w-5 mr-2" />
+                Add Tier
+              </button>
+              <button
+                onClick={handleReset}
+                disabled={resetMutation.isPending}
+                className="btn btn-secondary"
+              >
+                <ArrowPathIcon className="h-5 w-5 mr-2" />
+                Reset Defaults
+              </button>
+            </>
+          )}
+        </div>
       </div>
 
       {/* Tier Cards */}
       <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-6">
         {tiers?.map((tier) => (
           <div
-            key={tier.tier}
+            key={tier.code}
             className={clsx(
               'card border-2 transition-all',
-              tierColors[tier.tier],
               !tier.isActive && 'opacity-60'
             )}
+            style={getTierBorderColor(tier)}
           >
             {/* Header */}
             <div className="card-header flex items-center justify-between">
-              <div>
-                <span className={clsx('badge', tierBadgeColors[tier.tier])}>
-                  {tier.tier}
+              <div className="flex items-center gap-2">
+                <span
+                  className="badge"
+                  style={getTierBadgeStyle(tier)}
+                >
+                  {tier.code}
                 </span>
+                {tier.isDefault && (
+                  <span className="badge badge-gray text-xs">Default</span>
+                )}
                 {!tier.isActive && (
-                  <span className="badge badge-gray ml-2">Inactive</span>
+                  <span className="badge badge-gray">Inactive</span>
                 )}
               </div>
-              {isSuperAdmin && editingTier !== tier.tier && (
+              {isSuperAdmin && editingTier !== tier.code && (
                 <div className="flex gap-1">
                   <button
-                    onClick={() => openFeatureModal(tier.tier)}
+                    onClick={() => openFeatureModal(tier.code)}
                     className="p-1 text-gray-400 hover:text-primary-600 rounded"
                     title="Manage Features"
                   >
@@ -292,12 +429,40 @@ export default function TierConfigsPage() {
                   >
                     <PencilIcon className="h-4 w-4" />
                   </button>
+                  {!tier.isDefault && (
+                    <>
+                      {tier.archivedAt ? (
+                        <button
+                          onClick={() => restoreMutation.mutate(tier.code)}
+                          className="p-1 text-gray-400 hover:text-green-600 rounded"
+                          title="Restore Tier"
+                        >
+                          <ArchiveBoxArrowDownIcon className="h-4 w-4" />
+                        </button>
+                      ) : (
+                        <button
+                          onClick={() => archiveMutation.mutate(tier.code)}
+                          className="p-1 text-gray-400 hover:text-yellow-600 rounded"
+                          title="Archive Tier"
+                        >
+                          <ArchiveBoxIcon className="h-4 w-4" />
+                        </button>
+                      )}
+                      <button
+                        onClick={() => setDeleteConfirmTier(tier)}
+                        className="p-1 text-gray-400 hover:text-red-600 rounded"
+                        title="Delete Tier"
+                      >
+                        <TrashIcon className="h-4 w-4" />
+                      </button>
+                    </>
+                  )}
                 </div>
               )}
-              {editingTier === tier.tier && (
+              {editingTier === tier.code && (
                 <div className="flex gap-1">
                   <button
-                    onClick={() => saveEditing(tier.tier)}
+                    onClick={() => saveEditing(tier.code)}
                     disabled={updateMutation.isPending}
                     className="p-1 text-green-600 hover:text-green-700 rounded"
                   >
@@ -315,7 +480,7 @@ export default function TierConfigsPage() {
 
             <div className="card-body space-y-4">
               {/* Name & Description */}
-              {editingTier === tier.tier ? (
+              {editingTier === tier.code ? (
                 <div className="space-y-3">
                   <div>
                     <label className="text-xs font-medium text-gray-500">Name</label>
@@ -335,6 +500,24 @@ export default function TierConfigsPage() {
                       className="input text-sm mt-1"
                     />
                   </div>
+                  <div>
+                    <label className="text-xs font-medium text-gray-500">Color</label>
+                    <div className="flex gap-2 mt-1">
+                      {defaultColors.map((color) => (
+                        <button
+                          key={color.value}
+                          type="button"
+                          onClick={() => setEditForm({ ...editForm, color: color.value })}
+                          className={clsx(
+                            'w-6 h-6 rounded-full border-2',
+                            editForm.color === color.value ? 'border-gray-900' : 'border-transparent'
+                          )}
+                          style={{ backgroundColor: color.value }}
+                          title={color.name}
+                        />
+                      ))}
+                    </div>
+                  </div>
                 </div>
               ) : (
                 <div>
@@ -346,7 +529,7 @@ export default function TierConfigsPage() {
               {/* Price */}
               <div className="flex items-center gap-2">
                 <CurrencyDollarIcon className="h-5 w-5 text-gray-400" />
-                {editingTier === tier.tier ? (
+                {editingTier === tier.code ? (
                   <div className="flex items-center gap-2">
                     <input
                       type="number"
@@ -379,7 +562,7 @@ export default function TierConfigsPage() {
               {/* Duration */}
               <div className="flex items-center gap-2 text-sm">
                 <ClockIcon className="h-4 w-4 text-gray-400" />
-                {editingTier === tier.tier ? (
+                {editingTier === tier.code ? (
                   <div className="flex items-center gap-2">
                     <input
                       type="number"
@@ -404,14 +587,14 @@ export default function TierConfigsPage() {
                     <BuildingStorefrontIcon className="h-4 w-4 text-gray-400" />
                     <span className="text-gray-600">Max Branches</span>
                   </div>
-                  {editingTier === tier.tier ? (
+                  {editingTier === tier.code ? (
                     <input
                       type="number"
-                      value={editForm.maxBranches ?? -1}
-                      onChange={(e) => setEditForm({ ...editForm, maxBranches: parseInt(e.target.value) })}
+                      value={editForm.maxBranches ?? ''}
+                      onChange={(e) => setEditForm({ ...editForm, maxBranches: e.target.value ? parseInt(e.target.value) : null })}
                       className="input text-sm w-20"
                       min={-1}
-                      placeholder="-1 for unlimited"
+                      placeholder="Unlimited"
                     />
                   ) : (
                     <span className="font-medium">
@@ -425,14 +608,14 @@ export default function TierConfigsPage() {
                     <UsersIcon className="h-4 w-4 text-gray-400" />
                     <span className="text-gray-600">Max Users</span>
                   </div>
-                  {editingTier === tier.tier ? (
+                  {editingTier === tier.code ? (
                     <input
                       type="number"
-                      value={editForm.maxUsers ?? -1}
-                      onChange={(e) => setEditForm({ ...editForm, maxUsers: parseInt(e.target.value) })}
+                      value={editForm.maxUsers ?? ''}
+                      onChange={(e) => setEditForm({ ...editForm, maxUsers: e.target.value ? parseInt(e.target.value) : null })}
                       className="input text-sm w-20"
                       min={-1}
-                      placeholder="-1 for unlimited"
+                      placeholder="Unlimited"
                     />
                   ) : (
                     <span className="font-medium">
@@ -446,14 +629,14 @@ export default function TierConfigsPage() {
                     <ComputerDesktopIcon className="h-4 w-4 text-gray-400" />
                     <span className="text-gray-600">Max Activations</span>
                   </div>
-                  {editingTier === tier.tier ? (
+                  {editingTier === tier.code ? (
                     <input
                       type="number"
-                      value={editForm.maxActivations ?? -1}
-                      onChange={(e) => setEditForm({ ...editForm, maxActivations: parseInt(e.target.value) })}
+                      value={editForm.maxActivations ?? ''}
+                      onChange={(e) => setEditForm({ ...editForm, maxActivations: e.target.value ? parseInt(e.target.value) : null })}
                       className="input text-sm w-20"
                       min={-1}
-                      placeholder="-1 for unlimited"
+                      placeholder="Unlimited"
                     />
                   ) : (
                     <span className="font-medium">
@@ -467,13 +650,14 @@ export default function TierConfigsPage() {
                     <CubeIcon className="h-4 w-4 text-gray-400" />
                     <span className="text-gray-600">Max Products</span>
                   </div>
-                  {editingTier === tier.tier ? (
+                  {editingTier === tier.code ? (
                     <input
                       type="number"
-                      value={editForm.maxProducts ?? -1}
-                      onChange={(e) => setEditForm({ ...editForm, maxProducts: parseInt(e.target.value) })}
+                      value={editForm.maxProducts ?? ''}
+                      onChange={(e) => setEditForm({ ...editForm, maxProducts: e.target.value ? parseInt(e.target.value) : null })}
                       className="input text-sm w-20"
                       min={-1}
+                      placeholder="Unlimited"
                     />
                   ) : (
                     <span className="font-medium">
@@ -484,7 +668,7 @@ export default function TierConfigsPage() {
               </div>
 
               {/* Active Toggle */}
-              {editingTier === tier.tier && tier.tier !== 'BASIC' && (
+              {editingTier === tier.code && (
                 <div className="flex items-center justify-between pt-2 border-t border-gray-200">
                   <span className="text-sm text-gray-600">Active</span>
                   <button
@@ -511,7 +695,7 @@ export default function TierConfigsPage() {
                   <p className="text-xs font-medium text-gray-500">Features</p>
                   {isSuperAdmin && (
                     <button
-                      onClick={() => openFeatureModal(tier.tier)}
+                      onClick={() => openFeatureModal(tier.code)}
                       className="text-xs text-primary-600 hover:text-primary-700"
                     >
                       Manage
@@ -534,6 +718,9 @@ export default function TierConfigsPage() {
                       +{Object.keys(tier.features).length - 6} more features
                     </li>
                   )}
+                  {Object.keys(tier.features || {}).length === 0 && (
+                    <li className="text-gray-400 italic">No features configured</li>
+                  )}
                 </ul>
               </div>
             </div>
@@ -542,52 +729,278 @@ export default function TierConfigsPage() {
       </div>
 
       {/* Features Comparison Table */}
-      <div className="card">
-        <div className="card-header">
-          <h2 className="text-lg font-medium text-gray-900">Features Comparison</h2>
-        </div>
-        <div className="overflow-x-auto">
-          <table className="w-full">
-            <thead className="bg-gray-50">
-              <tr>
-                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Feature</th>
-                {tiers?.map((tier) => (
-                  <th key={tier.tier} className="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase">
-                    {tier.name}
-                  </th>
-                ))}
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-gray-200">
-              {tiers && tiers[0]?.features && Object.keys(tiers[0].features).map((feature) => (
-                <tr key={feature} className="hover:bg-gray-50">
-                  <td className="px-4 py-3 text-sm text-gray-900 capitalize">
-                    {feature.replace(/([A-Z])/g, ' $1').trim()}
-                  </td>
-                  {tiers.map((tier) => {
-                    const value = tier.features[feature];
-                    return (
-                      <td key={tier.tier} className="px-4 py-3 text-center">
-                        {typeof value === 'boolean' ? (
-                          value ? (
-                            <span className="text-green-500 font-bold">✓</span>
-                          ) : (
-                            <span className="text-gray-300">✗</span>
-                          )
-                        ) : (
-                          <span className="text-sm text-gray-900">
-                            {value === -1 ? 'Unlimited' : value}
-                          </span>
-                        )}
-                      </td>
-                    );
-                  })}
+      {tiers && tiers.length > 0 && Object.keys(tiers[0]?.features || {}).length > 0 && (
+        <div className="card">
+          <div className="card-header">
+            <h2 className="text-lg font-medium text-gray-900">Features Comparison</h2>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full">
+              <thead className="bg-gray-50">
+                <tr>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Feature</th>
+                  {tiers?.map((tier) => (
+                    <th key={tier.code} className="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase">
+                      {tier.name}
+                    </th>
+                  ))}
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody className="divide-y divide-gray-200">
+                {tiers && tiers[0]?.features && Object.keys(tiers[0].features).map((feature) => (
+                  <tr key={feature} className="hover:bg-gray-50">
+                    <td className="px-4 py-3 text-sm text-gray-900 capitalize">
+                      {feature.replace(/([A-Z])/g, ' $1').trim()}
+                    </td>
+                    {tiers.map((tier) => {
+                      const value = tier.features[feature];
+                      return (
+                        <td key={tier.code} className="px-4 py-3 text-center">
+                          {typeof value === 'boolean' ? (
+                            value ? (
+                              <span className="text-green-500 font-bold">✓</span>
+                            ) : (
+                              <span className="text-gray-300">✗</span>
+                            )
+                          ) : (
+                            <span className="text-sm text-gray-900">
+                              {value === -1 ? 'Unlimited' : value}
+                            </span>
+                          )}
+                        </td>
+                      );
+                    })}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         </div>
-      </div>
+      )}
+
+      {/* Create Tier Modal */}
+      {showCreateModal && (
+        <div className="fixed inset-0 z-50 overflow-y-auto">
+          <div className="flex min-h-screen items-center justify-center p-4">
+            <div
+              className="fixed inset-0 bg-black bg-opacity-30"
+              onClick={() => setShowCreateModal(false)}
+            />
+            <div className="relative bg-white rounded-lg shadow-xl max-w-lg w-full">
+              <form onSubmit={handleCreate}>
+                <div className="flex items-center justify-between p-4 border-b">
+                  <h3 className="text-lg font-medium text-gray-900">Create New Tier</h3>
+                  <button
+                    type="button"
+                    onClick={() => setShowCreateModal(false)}
+                    className="p-1 text-gray-400 hover:text-gray-600 rounded"
+                  >
+                    <XMarkIcon className="h-5 w-5" />
+                  </button>
+                </div>
+
+                <div className="p-4 space-y-4">
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700">Code *</label>
+                      <input
+                        type="text"
+                        value={createForm.code}
+                        onChange={(e) => setCreateForm({ ...createForm, code: e.target.value.toUpperCase().replace(/[^A-Z0-9_]/g, '') })}
+                        className="input mt-1"
+                        placeholder="GOLD_TIER"
+                        required
+                      />
+                      <p className="text-xs text-gray-500 mt-1">Uppercase letters, numbers, underscores</p>
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700">Name *</label>
+                      <input
+                        type="text"
+                        value={createForm.name}
+                        onChange={(e) => setCreateForm({ ...createForm, name: e.target.value })}
+                        className="input mt-1"
+                        placeholder="Gold Tier"
+                        required
+                      />
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700">Description</label>
+                    <textarea
+                      value={createForm.description}
+                      onChange={(e) => setCreateForm({ ...createForm, description: e.target.value })}
+                      className="input mt-1"
+                      rows={2}
+                      placeholder="Description of this tier..."
+                    />
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700">Price</label>
+                      <input
+                        type="number"
+                        value={createForm.price}
+                        onChange={(e) => setCreateForm({ ...createForm, price: parseFloat(e.target.value) || 0 })}
+                        className="input mt-1"
+                        min={0}
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700">Currency</label>
+                      <select
+                        value={createForm.currency}
+                        onChange={(e) => setCreateForm({ ...createForm, currency: e.target.value })}
+                        className="input mt-1"
+                      >
+                        <option value="GHS">GHS</option>
+                        <option value="USD">USD</option>
+                        <option value="EUR">EUR</option>
+                        <option value="GBP">GBP</option>
+                        <option value="NGN">NGN</option>
+                      </select>
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700">Duration (days)</label>
+                    <input
+                      type="number"
+                      value={createForm.durationDays}
+                      onChange={(e) => setCreateForm({ ...createForm, durationDays: parseInt(e.target.value) || 0 })}
+                      className="input mt-1"
+                      min={0}
+                    />
+                    <p className="text-xs text-gray-500 mt-1">0 = unlimited duration</p>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700">Max Users</label>
+                      <input
+                        type="number"
+                        value={createForm.maxUsers ?? ''}
+                        onChange={(e) => setCreateForm({ ...createForm, maxUsers: e.target.value ? parseInt(e.target.value) : null })}
+                        className="input mt-1"
+                        min={1}
+                        placeholder="Unlimited"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700">Max Branches</label>
+                      <input
+                        type="number"
+                        value={createForm.maxBranches ?? ''}
+                        onChange={(e) => setCreateForm({ ...createForm, maxBranches: e.target.value ? parseInt(e.target.value) : null })}
+                        className="input mt-1"
+                        min={1}
+                        placeholder="Unlimited"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700">Max Products</label>
+                      <input
+                        type="number"
+                        value={createForm.maxProducts ?? ''}
+                        onChange={(e) => setCreateForm({ ...createForm, maxProducts: e.target.value ? parseInt(e.target.value) : null })}
+                        className="input mt-1"
+                        min={1}
+                        placeholder="Unlimited"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700">Max Activations</label>
+                      <input
+                        type="number"
+                        value={createForm.maxActivations ?? ''}
+                        onChange={(e) => setCreateForm({ ...createForm, maxActivations: e.target.value ? parseInt(e.target.value) : null })}
+                        className="input mt-1"
+                        min={1}
+                        placeholder="Unlimited"
+                      />
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700">Color</label>
+                    <div className="flex gap-2 mt-2">
+                      {defaultColors.map((color) => (
+                        <button
+                          key={color.value}
+                          type="button"
+                          onClick={() => setCreateForm({ ...createForm, color: color.value })}
+                          className={clsx(
+                            'w-8 h-8 rounded-full border-2',
+                            createForm.color === color.value ? 'border-gray-900' : 'border-transparent'
+                          )}
+                          style={{ backgroundColor: color.value }}
+                          title={color.name}
+                        />
+                      ))}
+                    </div>
+                  </div>
+                </div>
+
+                <div className="flex items-center justify-end gap-3 p-4 border-t bg-gray-50">
+                  <button
+                    type="button"
+                    onClick={() => setShowCreateModal(false)}
+                    className="btn btn-secondary"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={createMutation.isPending}
+                    className="btn btn-primary"
+                  >
+                    {createMutation.isPending ? <LoadingSpinner size="sm" /> : 'Create Tier'}
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Delete Confirmation Modal */}
+      {deleteConfirmTier && (
+        <div className="fixed inset-0 z-50 overflow-y-auto">
+          <div className="flex min-h-screen items-center justify-center p-4">
+            <div
+              className="fixed inset-0 bg-black bg-opacity-30"
+              onClick={() => setDeleteConfirmTier(null)}
+            />
+            <div className="relative bg-white rounded-lg shadow-xl max-w-md w-full p-6">
+              <h3 className="text-lg font-medium text-gray-900 mb-2">Delete Tier</h3>
+              <p className="text-sm text-gray-500 mb-4">
+                Are you sure you want to permanently delete the <strong>{deleteConfirmTier.name}</strong> tier?
+                This action cannot be undone.
+              </p>
+              <div className="flex justify-end gap-3">
+                <button
+                  onClick={() => setDeleteConfirmTier(null)}
+                  className="btn btn-secondary"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={() => deleteMutation.mutate(deleteConfirmTier.code)}
+                  disabled={deleteMutation.isPending}
+                  className="btn bg-red-600 text-white hover:bg-red-700"
+                >
+                  {deleteMutation.isPending ? <LoadingSpinner size="sm" /> : 'Delete'}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Feature Management Modal */}
       {featureModalTier && (
@@ -628,16 +1041,6 @@ export default function TierConfigsPage() {
                   </div>
                 ) : (
                   <div className="space-y-6">
-                    {/* Initialize button */}
-                    {selectedFeatures.length === 0 && tierFeatures?.features && (
-                      <button
-                        onClick={initializeSelectedFeatures}
-                        className="w-full btn btn-secondary text-sm"
-                      >
-                        Load Current Feature Settings
-                      </button>
-                    )}
-
                     {/* Features grouped by category */}
                     {groupedFeatures && Object.entries(groupedFeatures).map(([category, features]) => (
                       <div key={category} className={clsx('rounded-lg border p-4', categoryColors[category] || categoryColors.general)}>

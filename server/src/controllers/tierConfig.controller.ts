@@ -1,10 +1,11 @@
 import { Request, Response } from 'express';
-import { LicenseTier, AuditAction } from '@prisma/client';
+import { AuditAction } from '@prisma/client';
 import prisma from '../lib/prisma';
 import {
   sendSuccess,
   sendError,
   sendNotFound,
+  sendCreated,
 } from '../utils/apiResponse';
 
 /**
@@ -31,7 +32,7 @@ export async function getTierConfigs(req: Request, res: Response): Promise<void>
           },
         },
       },
-      orderBy: { price: 'asc' },
+      orderBy: [{ displayOrder: 'asc' }, { price: 'asc' }],
     });
 
     // Transform to include features as a simple object for backwards compatibility
@@ -51,14 +52,14 @@ export async function getTierConfigs(req: Request, res: Response): Promise<void>
 }
 
 /**
- * Get a single tier configuration
+ * Get a single tier configuration by code
  */
 export async function getTierConfig(req: Request, res: Response): Promise<void> {
   try {
-    const { tier } = req.params;
+    const { code } = req.params;
 
     const tierConfig = await prisma.licenseTierConfig.findUnique({
-      where: { tier: tier as LicenseTier },
+      where: { code },
       include: {
         tierFeatures: {
           include: {
@@ -90,11 +91,135 @@ export async function getTierConfig(req: Request, res: Response): Promise<void> 
 }
 
 /**
+ * Create a new tier configuration
+ */
+export async function createTierConfig(req: Request, res: Response): Promise<void> {
+  try {
+    const {
+      code,
+      name,
+      description,
+      price,
+      currency,
+      durationDays,
+      maxUsers,
+      maxProducts,
+      maxTransactions,
+      maxBranches,
+      maxActivations,
+      displayOrder,
+      color,
+      featureIds,
+    } = req.body;
+
+    // Validate required fields
+    if (!code || !name) {
+      sendError(res, 'Code and name are required', 400);
+      return;
+    }
+
+    // Validate code format (uppercase alphanumeric with underscores)
+    const codeRegex = /^[A-Z][A-Z0-9_]*$/;
+    if (!codeRegex.test(code)) {
+      sendError(res, 'Code must be uppercase alphanumeric with underscores (e.g., GOLD_TIER)', 400);
+      return;
+    }
+
+    // Check if code already exists
+    const existing = await prisma.licenseTierConfig.findUnique({
+      where: { code },
+    });
+
+    if (existing) {
+      sendError(res, 'A tier with this code already exists', 400);
+      return;
+    }
+
+    // Get max display order if not provided
+    let order = displayOrder;
+    if (order === undefined) {
+      const maxOrder = await prisma.licenseTierConfig.aggregate({
+        _max: { displayOrder: true },
+      });
+      order = (maxOrder._max.displayOrder ?? 0) + 1;
+    }
+
+    // Create the tier
+    const tierConfig = await prisma.licenseTierConfig.create({
+      data: {
+        code,
+        name,
+        description,
+        price: price ?? 0,
+        currency: currency ?? 'GHS',
+        durationDays: durationDays ?? 365,
+        maxUsers,
+        maxProducts,
+        maxTransactions,
+        maxBranches,
+        maxActivations,
+        displayOrder: order,
+        color,
+        isDefault: false, // Custom tiers are never default
+      },
+    });
+
+    // If feature IDs provided, create tier features
+    if (featureIds && Array.isArray(featureIds) && featureIds.length > 0) {
+      const allFeatures = await prisma.feature.findMany({
+        where: { archivedAt: null },
+      });
+
+      const tierFeaturesToCreate = allFeatures.map((feature) => ({
+        tierId: tierConfig.id,
+        featureId: feature.id,
+        isEnabled: featureIds.includes(feature.id),
+      }));
+
+      await prisma.tierFeature.createMany({
+        data: tierFeaturesToCreate,
+      });
+    }
+
+    // Fetch the complete tier with features
+    const completeTier = await prisma.licenseTierConfig.findUnique({
+      where: { id: tierConfig.id },
+      include: {
+        tierFeatures: {
+          include: {
+            feature: true,
+          },
+        },
+      },
+    });
+
+    // Create audit log
+    await prisma.auditLog.create({
+      data: {
+        action: AuditAction.CREATE,
+        entityType: 'LicenseTierConfig',
+        entityId: tierConfig.id,
+        adminUserId: req.user?.id,
+        description: `Created new tier: ${name} (${code})`,
+        newValue: tierConfig,
+        ipAddress: req.ip,
+        userAgent: req.headers['user-agent'],
+      },
+    });
+
+    sendCreated(res, completeTier, 'Tier configuration created successfully');
+  } catch (error) {
+    console.error('Create tier config error:', error);
+    sendError(res, 'Failed to create tier configuration', 500);
+  }
+}
+
+/**
  * Update a tier configuration
  */
 export async function updateTierConfig(req: Request, res: Response): Promise<void> {
   try {
-    const { tier } = req.params;
+    const { code } = req.params;
     const {
       name,
       description,
@@ -106,11 +231,13 @@ export async function updateTierConfig(req: Request, res: Response): Promise<voi
       maxTransactions,
       maxBranches,
       maxActivations,
+      displayOrder,
+      color,
       isActive,
     } = req.body;
 
     const existing = await prisma.licenseTierConfig.findUnique({
-      where: { tier: tier as LicenseTier },
+      where: { code },
     });
 
     if (!existing) {
@@ -130,10 +257,12 @@ export async function updateTierConfig(req: Request, res: Response): Promise<voi
     if (maxTransactions !== undefined) updateData.maxTransactions = maxTransactions;
     if (maxBranches !== undefined) updateData.maxBranches = maxBranches;
     if (maxActivations !== undefined) updateData.maxActivations = maxActivations;
+    if (displayOrder !== undefined) updateData.displayOrder = displayOrder;
+    if (color !== undefined) updateData.color = color;
     if (isActive !== undefined) updateData.isActive = isActive;
 
     const tierConfig = await prisma.licenseTierConfig.update({
-      where: { tier: tier as LicenseTier },
+      where: { code },
       data: updateData,
       include: {
         tierFeatures: {
@@ -151,7 +280,7 @@ export async function updateTierConfig(req: Request, res: Response): Promise<voi
         entityType: 'LicenseTierConfig',
         entityId: tierConfig.id,
         adminUserId: req.user?.id,
-        description: `Updated ${tier} tier configuration`,
+        description: `Updated ${code} tier configuration`,
         previousValue: existing,
         newValue: updateData,
         ipAddress: req.ip,
@@ -171,14 +300,19 @@ export async function updateTierConfig(req: Request, res: Response): Promise<voi
  */
 export async function archiveTierConfig(req: Request, res: Response): Promise<void> {
   try {
-    const { tier } = req.params;
+    const { code } = req.params;
 
     const existing = await prisma.licenseTierConfig.findUnique({
-      where: { tier: tier as LicenseTier },
+      where: { code },
     });
 
     if (!existing) {
       sendNotFound(res, 'Tier configuration');
+      return;
+    }
+
+    if (existing.isDefault) {
+      sendError(res, 'Cannot archive default tiers. You can only deactivate them.', 400);
       return;
     }
 
@@ -187,8 +321,21 @@ export async function archiveTierConfig(req: Request, res: Response): Promise<vo
       return;
     }
 
+    // Check if any active licenses are using this tier
+    const activeLicenses = await prisma.license.count({
+      where: {
+        tierCode: code,
+        status: { in: ['ACTIVE', 'INACTIVE'] },
+      },
+    });
+
+    if (activeLicenses > 0) {
+      sendError(res, `Cannot archive tier with ${activeLicenses} active license(s). Reassign or revoke them first.`, 400);
+      return;
+    }
+
     const tierConfig = await prisma.licenseTierConfig.update({
-      where: { tier: tier as LicenseTier },
+      where: { code },
       data: {
         archivedAt: new Date(),
         isActive: false,
@@ -201,7 +348,7 @@ export async function archiveTierConfig(req: Request, res: Response): Promise<vo
         entityType: 'LicenseTierConfig',
         entityId: tierConfig.id,
         adminUserId: req.user?.id,
-        description: `Archived ${tier} tier configuration`,
+        description: `Archived ${code} tier configuration`,
         ipAddress: req.ip,
         userAgent: req.headers['user-agent'],
       },
@@ -215,14 +362,74 @@ export async function archiveTierConfig(req: Request, res: Response): Promise<vo
 }
 
 /**
+ * Delete a tier permanently (only for non-default, archived tiers with no licenses)
+ */
+export async function deleteTierConfig(req: Request, res: Response): Promise<void> {
+  try {
+    const { code } = req.params;
+
+    const existing = await prisma.licenseTierConfig.findUnique({
+      where: { code },
+    });
+
+    if (!existing) {
+      sendNotFound(res, 'Tier configuration');
+      return;
+    }
+
+    if (existing.isDefault) {
+      sendError(res, 'Cannot delete default tiers', 400);
+      return;
+    }
+
+    // Check if any licenses are using this tier
+    const licenses = await prisma.license.count({
+      where: { tierCode: code },
+    });
+
+    if (licenses > 0) {
+      sendError(res, `Cannot delete tier with ${licenses} license(s). Delete or reassign them first.`, 400);
+      return;
+    }
+
+    // Delete tier features first
+    await prisma.tierFeature.deleteMany({
+      where: { tierId: existing.id },
+    });
+
+    // Delete the tier
+    await prisma.licenseTierConfig.delete({
+      where: { code },
+    });
+
+    await prisma.auditLog.create({
+      data: {
+        action: AuditAction.DELETE,
+        entityType: 'LicenseTierConfig',
+        adminUserId: req.user?.id,
+        description: `Permanently deleted ${code} tier configuration`,
+        previousValue: existing,
+        ipAddress: req.ip,
+        userAgent: req.headers['user-agent'],
+      },
+    });
+
+    sendSuccess(res, null, 'Tier configuration deleted successfully');
+  } catch (error) {
+    console.error('Delete tier config error:', error);
+    sendError(res, 'Failed to delete tier configuration', 500);
+  }
+}
+
+/**
  * Restore an archived tier
  */
 export async function restoreTierConfig(req: Request, res: Response): Promise<void> {
   try {
-    const { tier } = req.params;
+    const { code } = req.params;
 
     const existing = await prisma.licenseTierConfig.findUnique({
-      where: { tier: tier as LicenseTier },
+      where: { code },
     });
 
     if (!existing) {
@@ -236,7 +443,7 @@ export async function restoreTierConfig(req: Request, res: Response): Promise<vo
     }
 
     const tierConfig = await prisma.licenseTierConfig.update({
-      where: { tier: tier as LicenseTier },
+      where: { code },
       data: {
         archivedAt: null,
         isActive: true,
@@ -249,7 +456,7 @@ export async function restoreTierConfig(req: Request, res: Response): Promise<vo
         entityType: 'LicenseTierConfig',
         entityId: tierConfig.id,
         adminUserId: req.user?.id,
-        description: `Restored ${tier} tier configuration`,
+        description: `Restored ${code} tier configuration`,
         ipAddress: req.ip,
         userAgent: req.headers['user-agent'],
       },
@@ -267,7 +474,7 @@ export async function restoreTierConfig(req: Request, res: Response): Promise<vo
  */
 export async function updateTierFeatures(req: Request, res: Response): Promise<void> {
   try {
-    const { tier } = req.params;
+    const { code } = req.params;
     const { features } = req.body; // Array of { featureId: string, isEnabled: boolean }
 
     if (!Array.isArray(features)) {
@@ -276,7 +483,7 @@ export async function updateTierFeatures(req: Request, res: Response): Promise<v
     }
 
     const tierConfig = await prisma.licenseTierConfig.findUnique({
-      where: { tier: tier as LicenseTier },
+      where: { code },
     });
 
     if (!tierConfig) {
@@ -304,7 +511,7 @@ export async function updateTierFeatures(req: Request, res: Response): Promise<v
 
     // Fetch updated tier with features
     const updatedTier = await prisma.licenseTierConfig.findUnique({
-      where: { tier: tier as LicenseTier },
+      where: { code },
       include: {
         tierFeatures: {
           include: {
@@ -320,7 +527,7 @@ export async function updateTierFeatures(req: Request, res: Response): Promise<v
         entityType: 'LicenseTierConfig',
         entityId: tierConfig.id,
         adminUserId: req.user?.id,
-        description: `Updated features for ${tier} tier`,
+        description: `Updated features for ${code} tier`,
         newValue: { features },
         ipAddress: req.ip,
         userAgent: req.headers['user-agent'],
@@ -339,7 +546,7 @@ export async function updateTierFeatures(req: Request, res: Response): Promise<v
  */
 export async function syncTierFeatures(req: Request, res: Response): Promise<void> {
   try {
-    const { tier } = req.params;
+    const { code } = req.params;
     const { featureIds } = req.body; // Array of feature IDs to enable
 
     if (!Array.isArray(featureIds)) {
@@ -348,7 +555,7 @@ export async function syncTierFeatures(req: Request, res: Response): Promise<voi
     }
 
     const tierConfig = await prisma.licenseTierConfig.findUnique({
-      where: { tier: tier as LicenseTier },
+      where: { code },
     });
 
     if (!tierConfig) {
@@ -379,7 +586,7 @@ export async function syncTierFeatures(req: Request, res: Response): Promise<voi
 
     // Fetch updated tier with features
     const updatedTier = await prisma.licenseTierConfig.findUnique({
-      where: { tier: tier as LicenseTier },
+      where: { code },
       include: {
         tierFeatures: {
           include: {
@@ -395,7 +602,7 @@ export async function syncTierFeatures(req: Request, res: Response): Promise<voi
         entityType: 'LicenseTierConfig',
         entityId: tierConfig.id,
         adminUserId: req.user?.id,
-        description: `Synced features for ${tier} tier`,
+        description: `Synced features for ${code} tier`,
         newValue: { featureIds },
         ipAddress: req.ip,
         userAgent: req.headers['user-agent'],
@@ -410,13 +617,13 @@ export async function syncTierFeatures(req: Request, res: Response): Promise<voi
 }
 
 /**
- * Create or reset tier configurations to defaults
+ * Create or reset default tier configurations
  */
 export async function resetTierConfigs(req: Request, res: Response): Promise<void> {
   try {
     const defaultConfigs = [
       {
-        tier: LicenseTier.BASIC,
+        code: 'BASIC',
         name: 'Basic',
         description: 'Free tier with essential features for small pharmacies',
         price: 0,
@@ -427,9 +634,12 @@ export async function resetTierConfigs(req: Request, res: Response): Promise<voi
         maxTransactions: null,
         maxBranches: 1,
         maxActivations: 1,
+        isDefault: true,
+        displayOrder: 0,
+        color: '#6B7280', // Gray
       },
       {
-        tier: LicenseTier.STANDARD,
+        code: 'STANDARD',
         name: 'Standard',
         description: 'Enhanced features for growing pharmacies - 1 branch, up to 3 users',
         price: 500,
@@ -440,9 +650,12 @@ export async function resetTierConfigs(req: Request, res: Response): Promise<voi
         maxTransactions: null,
         maxBranches: 1,
         maxActivations: 3,
+        isDefault: true,
+        displayOrder: 1,
+        color: '#3B82F6', // Blue
       },
       {
-        tier: LicenseTier.PROFESSIONAL,
+        code: 'PROFESSIONAL',
         name: 'Professional',
         description: 'Advanced features for established pharmacies - 3 branches, up to 10 users',
         price: 1200,
@@ -453,9 +666,12 @@ export async function resetTierConfigs(req: Request, res: Response): Promise<voi
         maxTransactions: null,
         maxBranches: 3,
         maxActivations: 9,
+        isDefault: true,
+        displayOrder: 2,
+        color: '#10B981', // Green
       },
       {
-        tier: LicenseTier.ENTERPRISE,
+        code: 'ENTERPRISE',
         name: 'Enterprise',
         description: 'Full-featured solution for pharmacy chains - unlimited branches and users',
         price: 3000,
@@ -466,12 +682,15 @@ export async function resetTierConfigs(req: Request, res: Response): Promise<voi
         maxTransactions: null,
         maxBranches: null,
         maxActivations: null,
+        isDefault: true,
+        displayOrder: 3,
+        color: '#8B5CF6', // Purple
       },
     ];
 
     for (const config of defaultConfigs) {
       await prisma.licenseTierConfig.upsert({
-        where: { tier: config.tier },
+        where: { code: config.code },
         update: config,
         create: config,
       });
@@ -483,14 +702,14 @@ export async function resetTierConfigs(req: Request, res: Response): Promise<voi
         action: AuditAction.UPDATE,
         entityType: 'LicenseTierConfig',
         adminUserId: req.user?.id,
-        description: 'Reset all tier configurations to defaults',
+        description: 'Reset default tier configurations',
         ipAddress: req.ip,
         userAgent: req.headers['user-agent'],
       },
     });
 
     const tiers = await prisma.licenseTierConfig.findMany({
-      orderBy: { price: 'asc' },
+      orderBy: [{ displayOrder: 'asc' }, { price: 'asc' }],
       include: {
         tierFeatures: {
           include: {
@@ -512,10 +731,10 @@ export async function resetTierConfigs(req: Request, res: Response): Promise<voi
  */
 export async function getTierFeatures(req: Request, res: Response): Promise<void> {
   try {
-    const { tier } = req.params;
+    const { code } = req.params;
 
     const tierConfig = await prisma.licenseTierConfig.findUnique({
-      where: { tier: tier as LicenseTier },
+      where: { code },
       include: {
         tierFeatures: {
           include: {
@@ -557,14 +776,48 @@ export async function getTierFeatures(req: Request, res: Response): Promise<void
   }
 }
 
+/**
+ * Reorder tiers
+ */
+export async function reorderTiers(req: Request, res: Response): Promise<void> {
+  try {
+    const { orders } = req.body; // Array of { code: string, displayOrder: number }
+
+    if (!Array.isArray(orders)) {
+      sendError(res, 'Orders must be an array', 400);
+      return;
+    }
+
+    for (const { code, displayOrder } of orders) {
+      await prisma.licenseTierConfig.update({
+        where: { code },
+        data: { displayOrder },
+      });
+    }
+
+    const tiers = await prisma.licenseTierConfig.findMany({
+      where: { archivedAt: null },
+      orderBy: [{ displayOrder: 'asc' }, { price: 'asc' }],
+    });
+
+    sendSuccess(res, tiers, 'Tier order updated successfully');
+  } catch (error) {
+    console.error('Reorder tiers error:', error);
+    sendError(res, 'Failed to reorder tiers', 500);
+  }
+}
+
 export default {
   getTierConfigs,
   getTierConfig,
+  createTierConfig,
   updateTierConfig,
   archiveTierConfig,
+  deleteTierConfig,
   restoreTierConfig,
   updateTierFeatures,
   syncTierFeatures,
   resetTierConfigs,
   getTierFeatures,
+  reorderTiers,
 };

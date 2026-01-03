@@ -1,4 +1,4 @@
-import { PrismaClient, AdminRole, LicenseTier } from '@prisma/client';
+import { PrismaClient, AdminRole } from '@prisma/client';
 import bcrypt from 'bcryptjs';
 import dotenv from 'dotenv';
 
@@ -38,14 +38,14 @@ const featureDefinitions = [
   { key: 'prioritySupport', name: 'Priority Support', description: '24/7 priority customer support', category: 'support' },
 ];
 
-// Define which features are enabled for each tier
-const tierFeatureMapping: Record<LicenseTier, string[]> = {
-  [LicenseTier.BASIC]: [
+// Define which features are enabled for each tier (by code)
+const tierFeatureMapping: Record<string, string[]> = {
+  BASIC: [
     'stockAdjustments',
     'lowStockAlerts',
     'expiryTracking',
   ],
-  [LicenseTier.STANDARD]: [
+  STANDARD: [
     'stockAdjustments',
     'customers',
     'prescriptions',
@@ -60,7 +60,7 @@ const tierFeatureMapping: Record<LicenseTier, string[]> = {
     'creditSales',
     'multiPayment',
   ],
-  [LicenseTier.PROFESSIONAL]: [
+  PROFESSIONAL: [
     'stockAdjustments',
     'customers',
     'prescriptions',
@@ -83,7 +83,7 @@ const tierFeatureMapping: Record<LicenseTier, string[]> = {
     'roleManagement',
     'backupRestore',
   ],
-  [LicenseTier.ENTERPRISE]: [
+  ENTERPRISE: [
     // All features enabled
     'stockAdjustments',
     'customers',
@@ -179,7 +179,7 @@ async function main() {
   // - Enterprise: unlimited everything
   const tierConfigs = [
     {
-      tier: LicenseTier.BASIC,
+      code: 'BASIC',
       name: 'Basic',
       description: 'Free tier with essential features for small pharmacies',
       price: 0,
@@ -190,9 +190,12 @@ async function main() {
       maxTransactions: null,
       maxBranches: 1,
       maxActivations: 1,
+      isDefault: true,
+      displayOrder: 0,
+      color: '#6B7280', // Gray
     },
     {
-      tier: LicenseTier.STANDARD,
+      code: 'STANDARD',
       name: 'Standard',
       description: 'Enhanced features for growing pharmacies - 1 branch, up to 3 users',
       price: 500,
@@ -203,9 +206,12 @@ async function main() {
       maxTransactions: null,
       maxBranches: 1,
       maxActivations: 3,
+      isDefault: true,
+      displayOrder: 1,
+      color: '#3B82F6', // Blue
     },
     {
-      tier: LicenseTier.PROFESSIONAL,
+      code: 'PROFESSIONAL',
       name: 'Professional',
       description: 'Advanced features for established pharmacies - 3 branches, up to 10 users',
       price: 1200,
@@ -216,9 +222,12 @@ async function main() {
       maxTransactions: null,
       maxBranches: 3,
       maxActivations: 9,
+      isDefault: true,
+      displayOrder: 2,
+      color: '#10B981', // Green
     },
     {
-      tier: LicenseTier.ENTERPRISE,
+      code: 'ENTERPRISE',
       name: 'Enterprise',
       description: 'Full-featured solution for pharmacy chains - unlimited branches and users',
       price: 3000,
@@ -229,29 +238,32 @@ async function main() {
       maxTransactions: null,
       maxBranches: null, // Unlimited
       maxActivations: null, // Unlimited
+      isDefault: true,
+      displayOrder: 3,
+      color: '#8B5CF6', // Purple
     },
   ];
 
   console.log('Creating tier configurations...');
-  const tierIdMap: Record<LicenseTier, string> = {} as Record<LicenseTier, string>;
+  const tierIdMap: Record<string, string> = {};
 
   for (const config of tierConfigs) {
     const existing = await prisma.licenseTierConfig.findUnique({
-      where: { tier: config.tier },
+      where: { code: config.code },
     });
 
     if (!existing) {
       const tierConfig = await prisma.licenseTierConfig.create({
         data: config,
       });
-      tierIdMap[config.tier] = tierConfig.id;
+      tierIdMap[config.code] = tierConfig.id;
       console.log(`  Created tier config: ${config.name}`);
     } else {
       const tierConfig = await prisma.licenseTierConfig.update({
-        where: { tier: config.tier },
+        where: { code: config.code },
         data: config,
       });
-      tierIdMap[config.tier] = tierConfig.id;
+      tierIdMap[config.code] = tierConfig.id;
       console.log(`  Updated tier config: ${config.name}`);
     }
   }
@@ -259,9 +271,9 @@ async function main() {
   // Create tier-feature associations
   console.log('Creating tier-feature associations...');
 
-  for (const tier of Object.values(LicenseTier)) {
-    const tierId = tierIdMap[tier];
-    const enabledFeatures = tierFeatureMapping[tier];
+  for (const tierCode of Object.keys(tierIdMap)) {
+    const tierId = tierIdMap[tierCode];
+    const enabledFeatures = tierFeatureMapping[tierCode] || [];
 
     // Delete existing tier features for this tier
     await prisma.tierFeature.deleteMany({
@@ -282,7 +294,7 @@ async function main() {
       });
     }
 
-    console.log(`  Configured ${enabledFeatures.length} features for ${tier} tier`);
+    console.log(`  Configured ${enabledFeatures.length} features for ${tierCode} tier`);
   }
 
   // Create some default system settings
