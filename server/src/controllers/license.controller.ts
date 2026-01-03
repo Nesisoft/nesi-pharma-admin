@@ -126,6 +126,7 @@ export async function generateLicense(req: Request, res: Response): Promise<void
   try {
     const {
       tier,
+      tierCode,
       pharmacyId,
       durationDays,
       maxActivations,
@@ -133,27 +134,41 @@ export async function generateLicense(req: Request, res: Response): Promise<void
       features,
     } = req.body;
 
-    if (!tier || !Object.values(LicenseTier).includes(tier)) {
-      sendError(res, 'Valid tier is required (STANDARD, PROFESSIONAL, ENTERPRISE)', 400);
+    // Use tierCode if provided, otherwise fall back to tier
+    const selectedTierCode = tierCode || tier;
+
+    if (!selectedTierCode) {
+      sendError(res, 'Tier code is required', 400);
       return;
     }
 
-    if (tier === LicenseTier.BASIC) {
+    // Validate tier code exists and is not BASIC
+    if (selectedTierCode === 'BASIC') {
       sendError(res, 'Cannot generate license for BASIC tier (free tier)', 400);
       return;
     }
 
     // Get tier configuration for defaults
     const tierConfig = await prisma.licenseTierConfig.findUnique({
-      where: { tier },
+      where: { code: selectedTierCode },
     });
+
+    if (!tierConfig) {
+      sendError(res, `Invalid tier code: ${selectedTierCode}`, 400);
+      return;
+    }
 
     // Use tier config defaults if not explicitly provided
     const licenseDurationDays = durationDays ?? tierConfig?.durationDays ?? 365;
     const licenseMaxActivations = maxActivations ?? tierConfig?.maxActivations ?? 1;
 
+    // Determine the enum tier for backwards compatibility
+    const enumTier = ['BASIC', 'STANDARD', 'PROFESSIONAL', 'ENTERPRISE'].includes(selectedTierCode)
+      ? selectedTierCode as LicenseTier
+      : LicenseTier.BASIC; // Default for custom tiers
+
     // Generate unique license key
-    let licenseKey = generateLicenseKey(tier);
+    let licenseKey = generateLicenseKey(selectedTierCode);
     let attempts = 0;
     const maxAttempts = 10;
 
@@ -162,7 +177,7 @@ export async function generateLicense(req: Request, res: Response): Promise<void
         where: { licenseKey },
       });
       if (!existing) break;
-      licenseKey = generateLicenseKey(tier);
+      licenseKey = generateLicenseKey(selectedTierCode);
       attempts++;
     }
 
@@ -172,13 +187,14 @@ export async function generateLicense(req: Request, res: Response): Promise<void
     }
 
     // Get features from database or fallback to defaults
-    const licenseFeatures = features || await getTierFeaturesFromDb(tier);
+    const licenseFeatures = features || await getTierFeaturesFromDb(selectedTierCode);
 
     // Create license
     const license = await prisma.license.create({
       data: {
         licenseKey,
-        tier,
+        tier: enumTier,
+        tierCode: selectedTierCode,
         status: LicenseStatus.INACTIVE,
         durationDays: licenseDurationDays,
         maxActivations: licenseMaxActivations,
@@ -205,8 +221,8 @@ export async function generateLicense(req: Request, res: Response): Promise<void
         entityType: 'License',
         entityId: license.id,
         adminUserId: req.user?.id,
-        description: `Generated ${tier} license: ${maskLicenseKey(licenseKey)}`,
-        newValue: { tier, licenseKey: maskLicenseKey(licenseKey) },
+        description: `Generated ${selectedTierCode} license: ${maskLicenseKey(licenseKey)}`,
+        newValue: { tier: selectedTierCode, licenseKey: maskLicenseKey(licenseKey) },
         ipAddress: req.ip,
         userAgent: req.headers['user-agent'],
       },
@@ -226,18 +242,22 @@ export async function generateBulkLicenses(req: Request, res: Response): Promise
   try {
     const {
       tier,
+      tierCode,
       count,
       durationDays,
       maxActivations,
       notes,
     } = req.body;
 
-    if (!tier || !Object.values(LicenseTier).includes(tier)) {
-      sendError(res, 'Valid tier is required', 400);
+    // Use tierCode if provided, otherwise fall back to tier
+    const selectedTierCode = tierCode || tier;
+
+    if (!selectedTierCode) {
+      sendError(res, 'Tier code is required', 400);
       return;
     }
 
-    if (tier === LicenseTier.BASIC) {
+    if (selectedTierCode === 'BASIC') {
       sendError(res, 'Cannot generate license for BASIC tier', 400);
       return;
     }
@@ -250,16 +270,26 @@ export async function generateBulkLicenses(req: Request, res: Response): Promise
 
     // Get tier configuration for defaults
     const tierConfig = await prisma.licenseTierConfig.findUnique({
-      where: { tier },
+      where: { code: selectedTierCode },
     });
+
+    if (!tierConfig) {
+      sendError(res, `Invalid tier code: ${selectedTierCode}`, 400);
+      return;
+    }
 
     // Use tier config defaults if not explicitly provided
     const licenseDurationDays = durationDays ?? tierConfig?.durationDays ?? 365;
     const licenseMaxActivations = maxActivations ?? tierConfig?.maxActivations ?? 1;
 
+    // Determine the enum tier for backwards compatibility
+    const enumTier = ['BASIC', 'STANDARD', 'PROFESSIONAL', 'ENTERPRISE'].includes(selectedTierCode)
+      ? selectedTierCode as LicenseTier
+      : LicenseTier.BASIC;
+
     // Generate unique keys
-    const licenseKeys = generateBulkLicenseKeys(tier, requestedCount);
-    const features = await getTierFeaturesFromDb(tier);
+    const licenseKeys = generateBulkLicenseKeys(selectedTierCode, requestedCount);
+    const features = await getTierFeaturesFromDb(selectedTierCode);
 
     // Create licenses
     const licenses = await Promise.all(
@@ -267,7 +297,8 @@ export async function generateBulkLicenses(req: Request, res: Response): Promise
         prisma.license.create({
           data: {
             licenseKey,
-            tier,
+            tier: enumTier,
+            tierCode: selectedTierCode,
             status: LicenseStatus.INACTIVE,
             durationDays: licenseDurationDays,
             maxActivations: licenseMaxActivations,
@@ -285,8 +316,8 @@ export async function generateBulkLicenses(req: Request, res: Response): Promise
         action: AuditAction.GENERATE,
         entityType: 'License',
         adminUserId: req.user?.id,
-        description: `Bulk generated ${requestedCount} ${tier} licenses`,
-        newValue: { tier, count: requestedCount },
+        description: `Bulk generated ${requestedCount} ${selectedTierCode} licenses`,
+        newValue: { tier: selectedTierCode, count: requestedCount },
         ipAddress: req.ip,
         userAgent: req.headers['user-agent'],
       },
@@ -299,7 +330,7 @@ export async function generateBulkLicenses(req: Request, res: Response): Promise
         licenses: licenses.map((l) => ({
           id: l.id,
           licenseKey: l.licenseKey,
-          tier: l.tier,
+          tier: l.tierCode || l.tier,
         })),
       },
       `Generated ${licenses.length} licenses`,
@@ -580,11 +611,11 @@ const PROFESSIONAL_FEATURES = {
  * Get features for a tier from the database
  * Falls back to hardcoded defaults if database features are not configured
  */
-async function getTierFeaturesFromDb(tier: LicenseTier): Promise<Record<string, unknown>> {
+async function getTierFeaturesFromDb(tierCode: string): Promise<Record<string, unknown>> {
   try {
     // Fetch tier configuration with features
     const tierConfig = await prisma.licenseTierConfig.findUnique({
-      where: { tier },
+      where: { code: tierCode },
       include: {
         tierFeatures: {
           include: {
@@ -598,8 +629,8 @@ async function getTierFeaturesFromDb(tier: LicenseTier): Promise<Record<string, 
       // Build features object from database
       const features: Record<string, unknown> = {
         // Include limits from tier config
-        maxUsers: tierConfig.maxUsers ?? (tier === 'ENTERPRISE' ? -1 : 1),
-        maxBranches: tierConfig.maxBranches ?? (tier === 'ENTERPRISE' ? -1 : 1),
+        maxUsers: tierConfig.maxUsers ?? (tierCode === 'ENTERPRISE' ? -1 : 1),
+        maxBranches: tierConfig.maxBranches ?? (tierCode === 'ENTERPRISE' ? -1 : 1),
         maxProducts: tierConfig.maxProducts ?? 500,
       };
 
@@ -612,10 +643,23 @@ async function getTierFeaturesFromDb(tier: LicenseTier): Promise<Record<string, 
     }
 
     // Fall back to hardcoded defaults if no DB features configured
-    return getDefaultFeatures(tier);
+    // Only use fallback for known tiers
+    if (['BASIC', 'STANDARD', 'PROFESSIONAL', 'ENTERPRISE'].includes(tierCode)) {
+      return getDefaultFeatures(tierCode as LicenseTier);
+    }
+
+    // For custom tiers without features, return minimal defaults
+    return {
+      maxUsers: 1,
+      maxBranches: 1,
+      maxProducts: 500,
+    };
   } catch (error) {
     console.error('Error fetching tier features from DB:', error);
-    return getDefaultFeatures(tier);
+    if (['BASIC', 'STANDARD', 'PROFESSIONAL', 'ENTERPRISE'].includes(tierCode)) {
+      return getDefaultFeatures(tierCode as LicenseTier);
+    }
+    return { maxUsers: 1, maxBranches: 1, maxProducts: 500 };
   }
 }
 
