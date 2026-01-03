@@ -6,8 +6,113 @@ dotenv.config();
 
 const prisma = new PrismaClient();
 
+// Define all features with their categories
+const featureDefinitions = [
+  // Core features
+  { key: 'stockAdjustments', name: 'Stock Adjustments', description: 'Adjust inventory stock levels', category: 'inventory' },
+  { key: 'customers', name: 'Customer Management', description: 'Manage customer records and history', category: 'sales' },
+  { key: 'prescriptions', name: 'Prescription Management', description: 'Handle and track prescriptions', category: 'pharmacy' },
+  { key: 'suppliers', name: 'Supplier Management', description: 'Manage supplier relationships', category: 'inventory' },
+  { key: 'barcodeScanning', name: 'Barcode Scanning', description: 'Scan barcodes for products', category: 'sales' },
+  { key: 'multiUser', name: 'Multi-User Support', description: 'Support for multiple user accounts', category: 'system' },
+
+  // Advanced features
+  { key: 'advancedReporting', name: 'Advanced Reporting', description: 'Detailed analytics and reports', category: 'reporting' },
+  { key: 'auditLog', name: 'Audit Log', description: 'Track all system changes', category: 'system' },
+  { key: 'expiryTracking', name: 'Expiry Tracking', description: 'Track product expiration dates', category: 'inventory' },
+  { key: 'lowStockAlerts', name: 'Low Stock Alerts', description: 'Notifications for low inventory', category: 'inventory' },
+  { key: 'purchaseOrders', name: 'Purchase Orders', description: 'Create and manage purchase orders', category: 'inventory' },
+  { key: 'salesReturns', name: 'Sales Returns', description: 'Process customer returns', category: 'sales' },
+  { key: 'discounts', name: 'Discounts', description: 'Apply discounts to sales', category: 'sales' },
+  { key: 'creditSales', name: 'Credit Sales', description: 'Allow sales on credit', category: 'sales' },
+  { key: 'multiPayment', name: 'Multi-Payment', description: 'Accept multiple payment methods', category: 'sales' },
+
+  // Enterprise features
+  { key: 'multiBranch', name: 'Multi-Branch', description: 'Support for multiple locations', category: 'enterprise' },
+  { key: 'branchTransfers', name: 'Branch Transfers', description: 'Transfer stock between branches', category: 'enterprise' },
+  { key: 'apiAccess', name: 'API Access', description: 'External API integration', category: 'enterprise' },
+  { key: 'customReports', name: 'Custom Reports', description: 'Create custom report templates', category: 'reporting' },
+  { key: 'dataExport', name: 'Data Export', description: 'Export data to various formats', category: 'reporting' },
+  { key: 'roleManagement', name: 'Role Management', description: 'Custom user roles and permissions', category: 'system' },
+  { key: 'backupRestore', name: 'Backup & Restore', description: 'Database backup and restore', category: 'system' },
+  { key: 'prioritySupport', name: 'Priority Support', description: '24/7 priority customer support', category: 'support' },
+];
+
+// Define which features are enabled for each tier
+const tierFeatureMapping: Record<LicenseTier, string[]> = {
+  [LicenseTier.BASIC]: [
+    'stockAdjustments',
+    'lowStockAlerts',
+    'expiryTracking',
+  ],
+  [LicenseTier.STANDARD]: [
+    'stockAdjustments',
+    'customers',
+    'prescriptions',
+    'suppliers',
+    'barcodeScanning',
+    'multiUser',
+    'expiryTracking',
+    'lowStockAlerts',
+    'purchaseOrders',
+    'salesReturns',
+    'discounts',
+    'creditSales',
+    'multiPayment',
+  ],
+  [LicenseTier.PROFESSIONAL]: [
+    'stockAdjustments',
+    'customers',
+    'prescriptions',
+    'suppliers',
+    'barcodeScanning',
+    'multiUser',
+    'advancedReporting',
+    'auditLog',
+    'expiryTracking',
+    'lowStockAlerts',
+    'purchaseOrders',
+    'salesReturns',
+    'discounts',
+    'creditSales',
+    'multiPayment',
+    'multiBranch',
+    'branchTransfers',
+    'customReports',
+    'dataExport',
+    'roleManagement',
+    'backupRestore',
+  ],
+  [LicenseTier.ENTERPRISE]: [
+    // All features enabled
+    'stockAdjustments',
+    'customers',
+    'prescriptions',
+    'suppliers',
+    'barcodeScanning',
+    'multiUser',
+    'advancedReporting',
+    'auditLog',
+    'expiryTracking',
+    'lowStockAlerts',
+    'purchaseOrders',
+    'salesReturns',
+    'discounts',
+    'creditSales',
+    'multiPayment',
+    'multiBranch',
+    'branchTransfers',
+    'apiAccess',
+    'customReports',
+    'dataExport',
+    'roleManagement',
+    'backupRestore',
+    'prioritySupport',
+  ],
+};
+
 async function main() {
-  console.log('🌱 Starting database seed...');
+  console.log('Starting database seed...');
 
   // Create default super admin user
   const adminEmail = process.env.ADMIN_EMAIL || 'admin@nesipharma.com';
@@ -31,16 +136,47 @@ async function main() {
         isActive: true,
       },
     });
-    console.log(`✅ Created super admin user: ${adminEmail}`);
+    console.log(`Created super admin user: ${adminEmail}`);
   } else {
-    console.log(`ℹ️  Super admin already exists: ${adminEmail}`);
+    console.log(`Super admin already exists: ${adminEmail}`);
+  }
+
+  // Create features
+  console.log('Creating features...');
+  const featureMap: Record<string, string> = {}; // key -> id mapping
+
+  for (const featureDef of featureDefinitions) {
+    const existing = await prisma.feature.findUnique({
+      where: { key: featureDef.key },
+    });
+
+    if (!existing) {
+      const feature = await prisma.feature.create({
+        data: featureDef,
+      });
+      featureMap[feature.key] = feature.id;
+      console.log(`  Created feature: ${featureDef.name}`);
+    } else {
+      // Update existing feature
+      const feature = await prisma.feature.update({
+        where: { key: featureDef.key },
+        data: {
+          name: featureDef.name,
+          description: featureDef.description,
+          category: featureDef.category,
+        },
+      });
+      featureMap[feature.key] = feature.id;
+      console.log(`  Updated feature: ${featureDef.name}`);
+    }
   }
 
   // Create license tier configurations
   // Tier limits:
-  // - Standard: 1 branch, 3 users, 3 activations (1 branch × 3 devices)
-  // - Professional: 3 branches, 10 users, 9 activations (3 branches × 3 devices)
-  // - Enterprise: unlimited branches, unlimited users, unlimited activations
+  // - Basic: 1 branch, 1 user, 500 products
+  // - Standard: 1 branch, 3 users, 5000 products
+  // - Professional: 3 branches, 10 users, unlimited products
+  // - Enterprise: unlimited everything
   const tierConfigs = [
     {
       tier: LicenseTier.BASIC,
@@ -49,22 +185,11 @@ async function main() {
       price: 0,
       currency: 'GHS',
       durationDays: 0, // Unlimited for free tier
-      features: {
-        maxUsers: 1,
-        maxProducts: 100,
-        salesTracking: true,
-        inventoryManagement: true,
-        basicReports: true,
-        advancedAnalytics: false,
-        multiLocation: false,
-        apiAccess: false,
-        prioritySupport: false,
-      },
       maxUsers: 1,
-      maxProducts: 100,
+      maxProducts: 500,
       maxTransactions: null,
       maxBranches: 1,
-      maxActivations: 1, // 1 branch × 1 device
+      maxActivations: 1,
     },
     {
       tier: LicenseTier.STANDARD,
@@ -73,25 +198,11 @@ async function main() {
       price: 500,
       currency: 'GHS',
       durationDays: 365,
-      features: {
-        maxUsers: 3,
-        maxProducts: 500,
-        salesTracking: true,
-        inventoryManagement: true,
-        basicReports: true,
-        advancedAnalytics: true,
-        multiLocation: false,
-        apiAccess: false,
-        prioritySupport: false,
-        prescriptionManagement: true,
-        customerManagement: true,
-        expiryAlerts: true,
-      },
       maxUsers: 3,
-      maxProducts: 500,
+      maxProducts: 5000,
       maxTransactions: null,
       maxBranches: 1,
-      maxActivations: 3, // 1 branch × 3 devices (one per user)
+      maxActivations: 3,
     },
     {
       tier: LicenseTier.PROFESSIONAL,
@@ -100,29 +211,11 @@ async function main() {
       price: 1200,
       currency: 'GHS',
       durationDays: 365,
-      features: {
-        maxUsers: 10,
-        maxProducts: 2000,
-        salesTracking: true,
-        inventoryManagement: true,
-        basicReports: true,
-        advancedAnalytics: true,
-        multiLocation: true,
-        maxLocations: 3,
-        apiAccess: true,
-        prioritySupport: true,
-        prescriptionManagement: true,
-        customerManagement: true,
-        expiryAlerts: true,
-        purchaseOrders: true,
-        supplierManagement: true,
-        cashReconciliation: true,
-      },
       maxUsers: 10,
-      maxProducts: 2000,
+      maxProducts: null, // Unlimited
       maxTransactions: null,
       maxBranches: 3,
-      maxActivations: 9, // 3 branches × 3 devices per branch
+      maxActivations: 9,
     },
     {
       tier: LicenseTier.ENTERPRISE,
@@ -131,28 +224,6 @@ async function main() {
       price: 3000,
       currency: 'GHS',
       durationDays: 365,
-      features: {
-        maxUsers: -1, // Unlimited
-        maxProducts: -1,
-        salesTracking: true,
-        inventoryManagement: true,
-        basicReports: true,
-        advancedAnalytics: true,
-        multiLocation: true,
-        maxLocations: -1,
-        apiAccess: true,
-        prioritySupport: true,
-        dedicatedSupport: true,
-        prescriptionManagement: true,
-        customerManagement: true,
-        expiryAlerts: true,
-        purchaseOrders: true,
-        supplierManagement: true,
-        cashReconciliation: true,
-        customIntegrations: true,
-        whiteLabeling: true,
-        auditTrail: true,
-      },
       maxUsers: null, // Unlimited
       maxProducts: null,
       maxTransactions: null,
@@ -161,23 +232,57 @@ async function main() {
     },
   ];
 
+  console.log('Creating tier configurations...');
+  const tierIdMap: Record<LicenseTier, string> = {} as Record<LicenseTier, string>;
+
   for (const config of tierConfigs) {
     const existing = await prisma.licenseTierConfig.findUnique({
       where: { tier: config.tier },
     });
 
     if (!existing) {
-      await prisma.licenseTierConfig.create({
+      const tierConfig = await prisma.licenseTierConfig.create({
         data: config,
       });
-      console.log(`✅ Created tier config: ${config.name}`);
+      tierIdMap[config.tier] = tierConfig.id;
+      console.log(`  Created tier config: ${config.name}`);
     } else {
-      await prisma.licenseTierConfig.update({
+      const tierConfig = await prisma.licenseTierConfig.update({
         where: { tier: config.tier },
         data: config,
       });
-      console.log(`✅ Updated tier config: ${config.name}`);
+      tierIdMap[config.tier] = tierConfig.id;
+      console.log(`  Updated tier config: ${config.name}`);
     }
+  }
+
+  // Create tier-feature associations
+  console.log('Creating tier-feature associations...');
+
+  for (const tier of Object.values(LicenseTier)) {
+    const tierId = tierIdMap[tier];
+    const enabledFeatures = tierFeatureMapping[tier];
+
+    // Delete existing tier features for this tier
+    await prisma.tierFeature.deleteMany({
+      where: { tierId },
+    });
+
+    // Create new tier features
+    for (const featureKey of Object.keys(featureMap)) {
+      const featureId = featureMap[featureKey];
+      const isEnabled = enabledFeatures.includes(featureKey);
+
+      await prisma.tierFeature.create({
+        data: {
+          tierId,
+          featureId,
+          isEnabled,
+        },
+      });
+    }
+
+    console.log(`  Configured ${enabledFeatures.length} features for ${tier} tier`);
   }
 
   // Create some default system settings
@@ -204,6 +309,7 @@ async function main() {
     },
   ];
 
+  console.log('Creating system settings...');
   for (const setting of systemSettings) {
     const existing = await prisma.systemSetting.findUnique({
       where: { key: setting.key },
@@ -213,18 +319,18 @@ async function main() {
       await prisma.systemSetting.create({
         data: setting,
       });
-      console.log(`✅ Created system setting: ${setting.key}`);
+      console.log(`  Created system setting: ${setting.key}`);
     }
   }
 
   console.log('');
-  console.log('🎉 Database seed completed!');
+  console.log('Database seed completed!');
   console.log('');
-  console.log('📋 Default Admin Credentials:');
+  console.log('Default Admin Credentials:');
   console.log(`   Email: ${adminEmail}`);
   console.log(`   Password: ${adminPassword}`);
   console.log('');
-  console.log('⚠️  Please change the default password after first login!');
+  console.log('Please change the default password after first login!');
 }
 
 main()
@@ -232,7 +338,7 @@ main()
     await prisma.$disconnect();
   })
   .catch(async (e) => {
-    console.error('❌ Seed error:', e);
+    console.error('Seed error:', e);
     await prisma.$disconnect();
     process.exit(1);
   });
