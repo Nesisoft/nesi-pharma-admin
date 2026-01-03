@@ -13,15 +13,29 @@ const app = express();
 // Security middleware
 app.use(helmet());
 
-// CORS configuration
-app.use(
-  cors({
-    origin: config.cors.origin,
-    credentials: true,
-    methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization'],
-  })
-);
+// CORS configuration for public license endpoints (allow any origin)
+// These endpoints are called by pharmacy client applications from various domains
+const publicCorsOptions: cors.CorsOptions = {
+  origin: '*', // Allow any origin for public endpoints
+  methods: ['GET', 'POST', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'X-License-Key', 'X-Device-Id'],
+};
+
+// CORS configuration for admin routes (restricted to admin frontend origin)
+const adminCorsOptions: cors.CorsOptions = {
+  origin: config.cors.origin,
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization'],
+};
+
+// Apply CORS based on route - public routes get permissive CORS, admin routes get restricted
+app.use((req, res, next) => {
+  if (req.path.startsWith('/api/public')) {
+    return cors(publicCorsOptions)(req, res, next);
+  }
+  return cors(adminCorsOptions)(req, res, next);
+});
 
 // Rate limiting
 const limiter = rateLimit({
