@@ -13,6 +13,7 @@ import {
   ArrowRightOnRectangleIcon,
   ChevronDownIcon,
   SparklesIcon,
+  PuzzlePieceIcon,
 } from '@heroicons/react/24/outline';
 import { Menu, Transition } from '@headlessui/react';
 import { Fragment } from 'react';
@@ -22,6 +23,7 @@ const navigation = [
   { name: 'Dashboard', href: '/', icon: HomeIcon },
   { name: 'Licenses', href: '/licenses', icon: KeyIcon },
   { name: 'License Tiers', href: '/tier-configs', icon: SparklesIcon },
+  { name: 'Features', href: '/features', icon: PuzzlePieceIcon },
   { name: 'Pharmacies', href: '/pharmacies', icon: BuildingStorefrontIcon },
   { name: 'Admin Users', href: '/admin-users', icon: UsersIcon },
   { name: 'Audit Logs', href: '/audit-logs', icon: ClipboardDocumentListIcon },

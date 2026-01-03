@@ -7,6 +7,7 @@ import adminUserRoutes from './adminUser.routes';
 import dashboardRoutes from './dashboard.routes';
 import auditLogRoutes from './auditLog.routes';
 import tierConfigRoutes from './tierConfig.routes';
+import featureRoutes from './feature.routes';
 
 const router = Router();
 
@@ -35,6 +36,7 @@ router.get('/', (_, res) => {
       dashboard: '/api/dashboard',
       'audit-logs': '/api/audit-logs',
       'tier-configs': '/api/tier-configs',
+      features: '/api/features',
     },
   });
 });
@@ -62,5 +64,8 @@ router.use('/audit-logs', auditLogRoutes);
 
 // Tier configuration routes
 router.use('/tier-configs', tierConfigRoutes);
+
+// Feature management routes
+router.use('/features', featureRoutes);
 
 export default router;

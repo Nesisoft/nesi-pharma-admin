@@ -16,7 +16,19 @@ import {
   ClockIcon,
   BuildingStorefrontIcon,
   ComputerDesktopIcon,
+  PuzzlePieceIcon,
 } from '@heroicons/react/24/outline';
+
+interface Feature {
+  id: string;
+  key: string;
+  name: string;
+  description: string | null;
+  category: string;
+  isActive: boolean;
+  isEnabled: boolean;
+  isAssigned: boolean;
+}
 
 interface TierConfig {
   id: string;
@@ -37,6 +49,11 @@ interface TierConfig {
   updatedAt: string;
 }
 
+interface TierFeaturesResponse {
+  tier: TierConfig;
+  features: Feature[];
+}
+
 const tierColors: Record<string, string> = {
   BASIC: 'border-gray-300 bg-gray-50',
   STANDARD: 'border-blue-300 bg-blue-50',
@@ -51,11 +68,23 @@ const tierBadgeColors: Record<string, string> = {
   ENTERPRISE: 'bg-purple-100 text-purple-800',
 };
 
+const categoryColors: Record<string, string> = {
+  core: 'bg-blue-50 border-blue-200',
+  sales: 'bg-green-50 border-green-200',
+  inventory: 'bg-yellow-50 border-yellow-200',
+  reports: 'bg-purple-50 border-purple-200',
+  customers: 'bg-pink-50 border-pink-200',
+  suppliers: 'bg-orange-50 border-orange-200',
+  general: 'bg-gray-50 border-gray-200',
+};
+
 export default function TierConfigsPage() {
   const { user } = useAuth();
   const queryClient = useQueryClient();
   const [editingTier, setEditingTier] = useState<string | null>(null);
   const [editForm, setEditForm] = useState<Partial<TierConfig>>({});
+  const [featureModalTier, setFeatureModalTier] = useState<string | null>(null);
+  const [selectedFeatures, setSelectedFeatures] = useState<string[]>([]);
 
   const isSuperAdmin = user?.role === 'SUPER_ADMIN';
 
@@ -65,6 +94,16 @@ export default function TierConfigsPage() {
       const response = await api.get('/tier-configs');
       return response.data.data;
     },
+  });
+
+  // Fetch features for a specific tier
+  const { data: tierFeatures, isLoading: featuresLoading } = useQuery<TierFeaturesResponse>({
+    queryKey: ['tier-features', featureModalTier],
+    queryFn: async () => {
+      const response = await api.get(`/tier-configs/${featureModalTier}/features`);
+      return response.data.data;
+    },
+    enabled: !!featureModalTier,
   });
 
   const updateMutation = useMutation({
@@ -90,6 +129,22 @@ export default function TierConfigsPage() {
     onSuccess: () => {
       toast.success('Tier configurations reset to defaults!');
       queryClient.invalidateQueries({ queryKey: ['tier-configs'] });
+    },
+    onError: (error) => {
+      toast.error(getErrorMessage(error));
+    },
+  });
+
+  const syncFeaturesMutation = useMutation({
+    mutationFn: async ({ tier, featureIds }: { tier: string; featureIds: string[] }) => {
+      const response = await api.post(`/tier-configs/${tier}/features/sync`, { featureIds });
+      return response.data;
+    },
+    onSuccess: () => {
+      toast.success('Tier features updated!');
+      queryClient.invalidateQueries({ queryKey: ['tier-configs'] });
+      queryClient.invalidateQueries({ queryKey: ['tier-features'] });
+      setFeatureModalTier(null);
     },
     onError: (error) => {
       toast.error(getErrorMessage(error));
@@ -126,6 +181,49 @@ export default function TierConfigsPage() {
       resetMutation.mutate();
     }
   };
+
+  const openFeatureModal = (tier: string) => {
+    setFeatureModalTier(tier);
+    setSelectedFeatures([]);
+  };
+
+  const closeFeatureModal = () => {
+    setFeatureModalTier(null);
+    setSelectedFeatures([]);
+  };
+
+  // Initialize selected features when tier features data loads
+  const initializeSelectedFeatures = () => {
+    if (tierFeatures?.features) {
+      const enabledIds = tierFeatures.features
+        .filter((f) => f.isEnabled)
+        .map((f) => f.id);
+      setSelectedFeatures(enabledIds);
+    }
+  };
+
+  // Toggle feature selection
+  const toggleFeature = (featureId: string) => {
+    setSelectedFeatures((prev) =>
+      prev.includes(featureId)
+        ? prev.filter((id) => id !== featureId)
+        : [...prev, featureId]
+    );
+  };
+
+  const saveFeatures = () => {
+    if (featureModalTier) {
+      syncFeaturesMutation.mutate({ tier: featureModalTier, featureIds: selectedFeatures });
+    }
+  };
+
+  // Group features by category
+  const groupedFeatures = tierFeatures?.features?.reduce((acc, feature) => {
+    const category = feature.category || 'general';
+    if (!acc[category]) acc[category] = [];
+    acc[category].push(feature);
+    return acc;
+  }, {} as Record<string, Feature[]>);
 
   if (isLoading) {
     return (
@@ -179,12 +277,22 @@ export default function TierConfigsPage() {
                 )}
               </div>
               {isSuperAdmin && editingTier !== tier.tier && (
-                <button
-                  onClick={() => startEditing(tier)}
-                  className="p-1 text-gray-400 hover:text-gray-600 rounded"
-                >
-                  <PencilIcon className="h-4 w-4" />
-                </button>
+                <div className="flex gap-1">
+                  <button
+                    onClick={() => openFeatureModal(tier.tier)}
+                    className="p-1 text-gray-400 hover:text-primary-600 rounded"
+                    title="Manage Features"
+                  >
+                    <PuzzlePieceIcon className="h-4 w-4" />
+                  </button>
+                  <button
+                    onClick={() => startEditing(tier)}
+                    className="p-1 text-gray-400 hover:text-gray-600 rounded"
+                    title="Edit Tier"
+                  >
+                    <PencilIcon className="h-4 w-4" />
+                  </button>
+                </div>
               )}
               {editingTier === tier.tier && (
                 <div className="flex gap-1">
@@ -399,7 +507,17 @@ export default function TierConfigsPage() {
 
               {/* Features Summary */}
               <div className="pt-2 border-t border-gray-200">
-                <p className="text-xs font-medium text-gray-500 mb-2">Features</p>
+                <div className="flex items-center justify-between mb-2">
+                  <p className="text-xs font-medium text-gray-500">Features</p>
+                  {isSuperAdmin && (
+                    <button
+                      onClick={() => openFeatureModal(tier.tier)}
+                      className="text-xs text-primary-600 hover:text-primary-700"
+                    >
+                      Manage
+                    </button>
+                  )}
+                </div>
                 <ul className="space-y-1 text-xs text-gray-600">
                   {Object.entries(tier.features || {}).slice(0, 6).map(([key, value]) => (
                     <li key={key} className="flex items-center gap-2">
@@ -470,6 +588,127 @@ export default function TierConfigsPage() {
           </table>
         </div>
       </div>
+
+      {/* Feature Management Modal */}
+      {featureModalTier && (
+        <div className="fixed inset-0 z-50 overflow-y-auto">
+          <div className="flex min-h-screen items-center justify-center p-4">
+            <div
+              className="fixed inset-0 bg-black bg-opacity-30"
+              onClick={closeFeatureModal}
+            />
+            <div className="relative bg-white rounded-lg shadow-xl max-w-2xl w-full max-h-[80vh] overflow-hidden flex flex-col">
+              <div className="flex items-center justify-between p-4 border-b">
+                <div>
+                  <h3 className="text-lg font-medium text-gray-900">
+                    Manage Features - {featureModalTier}
+                  </h3>
+                  <p className="text-sm text-gray-500">
+                    Select which features to enable for this tier
+                  </p>
+                </div>
+                <button
+                  onClick={closeFeatureModal}
+                  className="p-1 text-gray-400 hover:text-gray-600 rounded"
+                >
+                  <XMarkIcon className="h-5 w-5" />
+                </button>
+              </div>
+
+              <div className="flex-1 overflow-y-auto p-4">
+                {featuresLoading ? (
+                  <div className="flex items-center justify-center py-8">
+                    <LoadingSpinner size="md" />
+                  </div>
+                ) : tierFeatures?.features?.length === 0 ? (
+                  <div className="text-center py-8 text-gray-500">
+                    <PuzzlePieceIcon className="h-12 w-12 mx-auto mb-2 text-gray-300" />
+                    <p>No features available.</p>
+                    <p className="text-sm">Create features in the Features page first.</p>
+                  </div>
+                ) : (
+                  <div className="space-y-6">
+                    {/* Initialize button */}
+                    {selectedFeatures.length === 0 && tierFeatures?.features && (
+                      <button
+                        onClick={initializeSelectedFeatures}
+                        className="w-full btn btn-secondary text-sm"
+                      >
+                        Load Current Feature Settings
+                      </button>
+                    )}
+
+                    {/* Features grouped by category */}
+                    {groupedFeatures && Object.entries(groupedFeatures).map(([category, features]) => (
+                      <div key={category} className={clsx('rounded-lg border p-4', categoryColors[category] || categoryColors.general)}>
+                        <h4 className="text-sm font-medium text-gray-900 capitalize mb-3">
+                          {category} Features
+                        </h4>
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                          {features.map((feature) => (
+                            <label
+                              key={feature.id}
+                              className={clsx(
+                                'flex items-start gap-3 p-3 rounded-lg bg-white border cursor-pointer transition-colors',
+                                selectedFeatures.includes(feature.id)
+                                  ? 'border-primary-500 ring-1 ring-primary-500'
+                                  : 'border-gray-200 hover:border-gray-300'
+                              )}
+                            >
+                              <input
+                                type="checkbox"
+                                checked={selectedFeatures.includes(feature.id)}
+                                onChange={() => toggleFeature(feature.id)}
+                                className="mt-0.5 rounded border-gray-300 text-primary-600 focus:ring-primary-500"
+                              />
+                              <div className="flex-1 min-w-0">
+                                <div className="font-medium text-sm text-gray-900">
+                                  {feature.name}
+                                </div>
+                                <code className="text-xs text-gray-500">{feature.key}</code>
+                                {feature.description && (
+                                  <p className="text-xs text-gray-500 mt-1 truncate">
+                                    {feature.description}
+                                  </p>
+                                )}
+                              </div>
+                            </label>
+                          ))}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              <div className="flex items-center justify-between p-4 border-t bg-gray-50">
+                <div className="text-sm text-gray-500">
+                  {selectedFeatures.length} feature(s) selected
+                </div>
+                <div className="flex gap-3">
+                  <button
+                    onClick={closeFeatureModal}
+                    className="btn btn-secondary"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={saveFeatures}
+                    disabled={syncFeaturesMutation.isPending}
+                    className="btn btn-primary"
+                  >
+                    {syncFeaturesMutation.isPending ? (
+                      <LoadingSpinner size="sm" />
+                    ) : (
+                      'Save Features'
+                    )}
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

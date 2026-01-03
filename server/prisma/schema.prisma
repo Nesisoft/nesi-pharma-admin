@@ -198,9 +198,6 @@ model LicenseTierConfig {
   currency        String      @default("GHS")
   durationDays    Int         @default(365)
 
-  // Feature flags
-  features        Json
-
   // Limits
   maxUsers        Int?        // Maximum users per license
   maxProducts     Int?        // Maximum products in inventory
@@ -209,10 +206,51 @@ model LicenseTierConfig {
   maxActivations  Int?        // Maximum device activations per license (null = unlimited)
 
   isActive        Boolean     @default(true)
+  archivedAt      DateTime?   // Soft delete
   createdAt       DateTime    @default(now())
   updatedAt       DateTime    @updatedAt
 
+  // Relations
+  tierFeatures    TierFeature[]
+
   @@map("license_tier_configs")
+}
+
+// ==================== FEATURES ====================
+
+model Feature {
+  id              String    @id @default(uuid())
+  key             String    @unique  // e.g., "customers", "prescriptions"
+  name            String             // Display name e.g., "Customer Management"
+  description     String?
+  category        String    @default("general") // For grouping: "core", "inventory", "sales", "reports", etc.
+
+  isActive        Boolean   @default(true)
+  archivedAt      DateTime? // Soft delete
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  // Relations
+  tierFeatures    TierFeature[]
+
+  @@map("features")
+}
+
+// ==================== TIER FEATURES (Join Table) ====================
+
+model TierFeature {
+  id              String            @id @default(uuid())
+  tierId          String
+  tier            LicenseTierConfig @relation(fields: [tierId], references: [id], onDelete: Cascade)
+  featureId       String
+  feature         Feature           @relation(fields: [featureId], references: [id], onDelete: Cascade)
+
+  isEnabled       Boolean           @default(true)
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
+
+  @@unique([tierId, featureId])
+  @@map("tier_features")
 }
 
 // ==================== AUDIT LOGS ====================

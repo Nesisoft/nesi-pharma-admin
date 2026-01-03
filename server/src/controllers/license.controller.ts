@@ -171,6 +171,9 @@ export async function generateLicense(req: Request, res: Response): Promise<void
       return;
     }
 
+    // Get features from database or fallback to defaults
+    const licenseFeatures = features || await getTierFeaturesFromDb(tier);
+
     // Create license
     const license = await prisma.license.create({
       data: {
@@ -181,7 +184,7 @@ export async function generateLicense(req: Request, res: Response): Promise<void
         maxActivations: licenseMaxActivations,
         pharmacyId: pharmacyId || null,
         notes,
-        features: features || getDefaultFeatures(tier),
+        features: licenseFeatures,
         generatedById: req.user?.id,
       },
       include: {
@@ -256,7 +259,7 @@ export async function generateBulkLicenses(req: Request, res: Response): Promise
 
     // Generate unique keys
     const licenseKeys = generateBulkLicenseKeys(tier, requestedCount);
-    const features = getDefaultFeatures(tier);
+    const features = await getTierFeaturesFromDb(tier);
 
     // Create licenses
     const licenses = await Promise.all(
@@ -574,7 +577,50 @@ const PROFESSIONAL_FEATURES = {
 
 
 /**
- * Get default features for a tier
+ * Get features for a tier from the database
+ * Falls back to hardcoded defaults if database features are not configured
+ */
+async function getTierFeaturesFromDb(tier: LicenseTier): Promise<Record<string, unknown>> {
+  try {
+    // Fetch tier configuration with features
+    const tierConfig = await prisma.licenseTierConfig.findUnique({
+      where: { tier },
+      include: {
+        tierFeatures: {
+          include: {
+            feature: true,
+          },
+        },
+      },
+    });
+
+    if (tierConfig && tierConfig.tierFeatures.length > 0) {
+      // Build features object from database
+      const features: Record<string, unknown> = {
+        // Include limits from tier config
+        maxUsers: tierConfig.maxUsers ?? (tier === 'ENTERPRISE' ? -1 : 1),
+        maxBranches: tierConfig.maxBranches ?? (tier === 'ENTERPRISE' ? -1 : 1),
+        maxProducts: tierConfig.maxProducts ?? 500,
+      };
+
+      // Add feature flags
+      for (const tf of tierConfig.tierFeatures) {
+        features[tf.feature.key] = tf.isEnabled;
+      }
+
+      return features;
+    }
+
+    // Fall back to hardcoded defaults if no DB features configured
+    return getDefaultFeatures(tier);
+  } catch (error) {
+    console.error('Error fetching tier features from DB:', error);
+    return getDefaultFeatures(tier);
+  }
+}
+
+/**
+ * Get default features for a tier (hardcoded fallback)
  * These feature keys map directly to the frontend's feature configuration
  */
 function getDefaultFeatures(tier: LicenseTier) {

@@ -18,6 +18,7 @@ import AdminUsersPage from '@/pages/AdminUsersPage';
 import AuditLogsPage from '@/pages/AuditLogsPage';
 import SettingsPage from '@/pages/SettingsPage';
 import TierConfigsPage from '@/pages/TierConfigsPage';
+import FeaturesPage from '@/pages/FeaturesPage';
 
 // Components
 import LoadingSpinner from '@/components/ui/LoadingSpinner';
@@ -65,6 +66,7 @@ function App() {
         <Route path="pharmacies/:id/edit" element={<EditPharmacyPage />} />
         <Route path="admin-users" element={<AdminUsersPage />} />
         <Route path="tier-configs" element={<TierConfigsPage />} />
+        <Route path="features" element={<FeaturesPage />} />
         <Route path="audit-logs" element={<AuditLogsPage />} />
         <Route path="settings" element={<SettingsPage />} />
       </Route>
