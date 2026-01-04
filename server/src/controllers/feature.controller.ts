@@ -97,7 +97,7 @@ export async function createFeature(req: Request, res: Response): Promise<void> 
 
     const feature = await prisma.feature.create({
       data: {
-        key: key.toLowerCase().replace(/\s+/g, '_'),
+        key: key.replace(/\s+/g, '_'),
         name,
         description,
         category: category || 'general',
@@ -143,7 +143,7 @@ export async function updateFeature(req: Request, res: Response): Promise<void> 
     const feature = await prisma.feature.update({
       where: { id },
       data: {
-        ...(key && { key: key.toLowerCase().replace(/\s+/g, '_') }),
+        ...(key && { key: key.replace(/\s+/g, '_') }),
         ...(name && { name }),
         ...(description !== undefined && { description }),
         ...(category && { category }),
