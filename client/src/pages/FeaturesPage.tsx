@@ -470,10 +470,10 @@ export default function FeaturesPage() {
                     type="text"
                     value={formData.key}
                     onChange={(e) =>
-                      setFormData({ ...formData, key: e.target.value.toLowerCase().replace(/\s+/g, '_') })
+                      setFormData({ ...formData, key: e.target.value.replace(/\s+/g, '_') })
                     }
                     className="input w-full"
-                    placeholder="e.g., customers, prescriptions"
+                    placeholder="e.g., customers, advancedReporting"
                     required
                     disabled={!!editingFeature}
                   />
