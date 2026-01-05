@@ -5,6 +5,55 @@ import { validateLicenseKeyFormat } from '../utils/licenseKey';
 import { sendSuccess, sendError } from '../utils/apiResponse';
 
 /**
+ * Get features for a license tier from the database
+ * This ensures features are always fresh from the database, not cached
+ */
+async function getTierFeaturesFromDb(tierCode: string): Promise<Record<string, unknown>> {
+  try {
+    const tierConfig = await prisma.licenseTierConfig.findUnique({
+      where: { code: tierCode },
+      include: {
+        tierFeatures: {
+          include: {
+            feature: {
+              select: {
+                key: true,
+                isActive: true,
+              },
+            },
+          },
+        },
+      },
+    });
+
+    if (!tierConfig) {
+      return {};
+    }
+
+    // Build features object from database
+    const features: Record<string, unknown> = {
+      // Include limits from tier config
+      maxUsers: tierConfig.maxUsers ?? 1,
+      maxBranches: tierConfig.maxBranches ?? 1,
+      maxProducts: tierConfig.maxProducts ?? 500,
+    };
+
+    // Add feature flags from TierFeature join table
+    // Only include features that are active in the Feature table
+    for (const tf of tierConfig.tierFeatures) {
+      if (tf.feature.isActive) {
+        features[tf.feature.key] = tf.isEnabled;
+      }
+    }
+
+    return features;
+  } catch (error) {
+    console.error('Error fetching tier features from DB:', error);
+    return {};
+  }
+}
+
+/**
  * Verify a license key (public endpoint for pharmacy app)
  */
 export async function verifyLicense(req: Request, res: Response): Promise<void> {
@@ -89,13 +138,18 @@ export async function verifyLicense(req: Request, res: Response): Promise<void> 
     // Log successful verification
     await logVerificationById(license.id, req, true, 'License valid');
 
-    // Return license info
+    // Get fresh features from database
+    const tierCode = license.tierCode || license.tier;
+    const freshFeatures = await getTierFeaturesFromDb(tierCode);
+
+    // Return license info with fresh features from database
     sendSuccess(res, {
       valid: true,
       license: {
         tier: license.tier,
+        tierCode: license.tierCode,
         status: license.status,
-        features: license.features,
+        features: freshFeatures,
         validFrom: license.validFrom,
         validUntil: license.validUntil,
         expiresAt: license.expiresAt,
@@ -183,13 +237,18 @@ export async function activateLicense(req: Request, res: Response): Promise<void
       );
 
       if (existingActivation) {
-        // Return existing activation info
+        // Get fresh features from database based on tier
+        const tierCode = license.tierCode || license.tier;
+        const freshFeatures = await getTierFeaturesFromDb(tierCode);
+
+        // Return existing activation info with fresh features
         sendSuccess(res, {
           activated: true,
           alreadyActivated: true,
           license: {
             tier: license.tier,
-            features: license.features,
+            tierCode: license.tierCode,
+            features: freshFeatures,
             expiresAt: license.expiresAt,
           },
           activation: {
@@ -240,6 +299,10 @@ export async function activateLicense(req: Request, res: Response): Promise<void
     const now = new Date();
     const expiresAt = new Date(now.getTime() + license.durationDays * 24 * 60 * 60 * 1000);
 
+    // Get fresh features from database
+    const tierCode = license.tierCode || license.tier;
+    const freshFeatures = await getTierFeaturesFromDb(tierCode);
+
     // Create activation
     const activation = await prisma.licenseActivation.create({
       data: {
@@ -253,7 +316,7 @@ export async function activateLicense(req: Request, res: Response): Promise<void
       },
     });
 
-    // Update license
+    // Update license with fresh features from database
     await prisma.license.update({
       where: { id: license.id },
       data: {
@@ -264,6 +327,7 @@ export async function activateLicense(req: Request, res: Response): Promise<void
         validFrom: license.validFrom || now,
         validUntil: expiresAt,
         expiresAt,
+        features: freshFeatures, // Update cached features with fresh DB values
       },
     });
 
@@ -284,7 +348,8 @@ export async function activateLicense(req: Request, res: Response): Promise<void
       activated: true,
       license: {
         tier: license.tier,
-        features: license.features,
+        tierCode: license.tierCode,
+        features: freshFeatures,
         validFrom: now,
         expiresAt,
       },
