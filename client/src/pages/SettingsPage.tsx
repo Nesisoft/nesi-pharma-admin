@@ -107,24 +107,191 @@ export default function SettingsPage() {
         </div>
         <div className="card-body">
           <p className="text-gray-600 mb-4">Use the following endpoints to integrate license verification into your pharmacy application:</p>
-          <div className="space-y-4 font-mono text-sm">
+          <div className="space-y-6 text-sm">
+            {/* Verify License */}
             <div className="p-4 bg-gray-50 rounded-lg">
-              <p className="text-green-600 font-medium">POST /api/public/license/verify</p>
-              <p className="text-gray-500 mt-1">Verify a license key</p>
-              <pre className="mt-2 text-gray-700">{`{ "licenseKey": "XXXX-XXXX-XXXX-XXXX-XXXX" }`}</pre>
-            </div>
-            <div className="p-4 bg-gray-50 rounded-lg">
-              <p className="text-green-600 font-medium">POST /api/public/license/activate</p>
-              <p className="text-gray-500 mt-1">Activate a license on a device</p>
-              <pre className="mt-2 text-gray-700">{`{
-  "licenseKey": "XXXX-XXXX-XXXX-XXXX-XXXX",
-  "deviceId": "unique-device-id",
-  "deviceName": "Device Name"
+              <p className="text-green-600 font-medium font-mono">POST /api/public/license/verify</p>
+              <p className="text-gray-500 mt-1">Verify a license key and get its current status and features</p>
+              <div className="mt-3">
+                <p className="text-xs font-semibold text-gray-700 mb-1">Request Body:</p>
+                <pre className="bg-gray-100 p-2 rounded text-xs overflow-x-auto">{`{
+  "licenseKey": "STD-XXXX-XXXX-XXXX-XXXX",
+  "deviceId": "optional-device-id"
 }`}</pre>
+              </div>
+              <div className="mt-3">
+                <p className="text-xs font-semibold text-gray-700 mb-1">Success Response (200):</p>
+                <pre className="bg-gray-100 p-2 rounded text-xs overflow-x-auto">{`{
+  "success": true,
+  "message": "License is valid",
+  "data": {
+    "valid": true,
+    "license": {
+      "tier": "STANDARD",
+      "tierCode": "STANDARD",
+      "status": "ACTIVE",
+      "features": {
+        "maxUsers": 3,
+        "maxBranches": 1,
+        "maxProducts": 5000,
+        "barcodeScanning": true,
+        "inventoryReports": false,
+        ...
+      },
+      "validFrom": "2024-01-15T00:00:00.000Z",
+      "validUntil": "2025-01-15T00:00:00.000Z",
+      "expiresAt": "2025-01-15T00:00:00.000Z"
+    },
+    "pharmacy": {
+      "id": "pharmacy-uuid",
+      "name": "ABC Pharmacy"
+    }
+  }
+}`}</pre>
+              </div>
+              <div className="mt-3">
+                <p className="text-xs font-semibold text-gray-700 mb-1">Error Responses:</p>
+                <pre className="bg-red-50 p-2 rounded text-xs overflow-x-auto text-red-700">{`400: "License key is required" | "Invalid license key format"
+403: "License has been revoked" | "License has been suspended" | "License has expired"
+404: "License key not found"
+500: "License verification failed"`}</pre>
+              </div>
             </div>
+
+            {/* Activate License */}
             <div className="p-4 bg-gray-50 rounded-lg">
-              <p className="text-green-600 font-medium">GET /api/public/license/tiers</p>
-              <p className="text-gray-500 mt-1">Get available license tiers and features</p>
+              <p className="text-green-600 font-medium font-mono">POST /api/public/license/activate</p>
+              <p className="text-gray-500 mt-1">Activate a license on a device. Can also register pharmacy details during first activation.</p>
+              <div className="mt-3">
+                <p className="text-xs font-semibold text-gray-700 mb-1">Request Body:</p>
+                <pre className="bg-gray-100 p-2 rounded text-xs overflow-x-auto">{`{
+  "licenseKey": "PRO-XXXX-XXXX-XXXX-XXXX",
+  "deviceId": "unique-device-identifier",
+  "deviceName": "Main POS Terminal",
+  "deviceFingerprint": "optional-hardware-fingerprint",
+  "pharmacy": {                           // Optional - for first activation
+    "name": "ABC Pharmacy",
+    "email": "contact@abcpharmacy.com",
+    "phone": "+233200000000",
+    "address": "123 Main Street",
+    "city": "Accra",
+    "region": "Greater Accra",
+    "country": "Ghana",
+    "registrationNumber": "PH-12345"
+  }
+}`}</pre>
+              </div>
+              <div className="mt-3">
+                <p className="text-xs font-semibold text-gray-700 mb-1">Success Response (200):</p>
+                <pre className="bg-gray-100 p-2 rounded text-xs overflow-x-auto">{`{
+  "success": true,
+  "message": "License activated successfully",
+  "data": {
+    "activated": true,
+    "alreadyActivated": false,    // true if device was already activated
+    "license": {
+      "tier": "PROFESSIONAL",
+      "tierCode": "PROFESSIONAL",
+      "features": {
+        "maxUsers": 10,
+        "maxBranches": 3,
+        "maxProducts": -1,
+        "suppliers": true,
+        "purchaseOrders": true,
+        "customers": true,
+        ...
+      },
+      "validFrom": "2024-01-15T10:30:00.000Z",
+      "expiresAt": "2025-01-15T10:30:00.000Z"
+    },
+    "activation": {
+      "id": "activation-uuid",
+      "deviceName": "Main POS Terminal",
+      "activatedAt": "2024-01-15T10:30:00.000Z"
+    }
+  }
+}`}</pre>
+              </div>
+              <div className="mt-3">
+                <p className="text-xs font-semibold text-gray-700 mb-1">Error Responses:</p>
+                <pre className="bg-red-50 p-2 rounded text-xs overflow-x-auto text-red-700">{`400: "License key is required" | "Invalid license key format"
+403: "License has been revoked" | "License has expired" |
+     "Pharmacy account is suspended. Contact support to reactivate." |
+     "Maximum activations reached for this license"
+404: "License key not found"
+500: "License activation failed"`}</pre>
+              </div>
+            </div>
+
+            {/* Deactivate License */}
+            <div className="p-4 bg-gray-50 rounded-lg">
+              <p className="text-orange-600 font-medium font-mono">POST /api/public/license/deactivate</p>
+              <p className="text-gray-500 mt-1">Deactivate a license on a specific device to free up an activation slot</p>
+              <div className="mt-3">
+                <p className="text-xs font-semibold text-gray-700 mb-1">Request Body:</p>
+                <pre className="bg-gray-100 p-2 rounded text-xs overflow-x-auto">{`{
+  "licenseKey": "PRO-XXXX-XXXX-XXXX-XXXX",
+  "deviceId": "unique-device-identifier",     // Either deviceId
+  "activationId": "activation-uuid"           // OR activationId is required
+}`}</pre>
+              </div>
+              <div className="mt-3">
+                <p className="text-xs font-semibold text-gray-700 mb-1">Success Response (200):</p>
+                <pre className="bg-gray-100 p-2 rounded text-xs overflow-x-auto">{`{
+  "success": true,
+  "message": "License deactivated successfully",
+  "data": null
+}`}</pre>
+              </div>
+              <div className="mt-3">
+                <p className="text-xs font-semibold text-gray-700 mb-1">Error Responses:</p>
+                <pre className="bg-red-50 p-2 rounded text-xs overflow-x-auto text-red-700">{`400: "License key is required" | "Device ID or activation ID is required"
+404: "License key not found" | "Active activation not found"
+500: "License deactivation failed"`}</pre>
+              </div>
+            </div>
+
+            {/* Get Tiers */}
+            <div className="p-4 bg-gray-50 rounded-lg">
+              <p className="text-blue-600 font-medium font-mono">GET /api/public/license/tiers</p>
+              <p className="text-gray-500 mt-1">Get all available license tiers with their configurations and pricing</p>
+              <div className="mt-3">
+                <p className="text-xs font-semibold text-gray-700 mb-1">Success Response (200):</p>
+                <pre className="bg-gray-100 p-2 rounded text-xs overflow-x-auto">{`{
+  "success": true,
+  "data": [
+    {
+      "id": "tier-uuid",
+      "code": "BASIC",
+      "name": "Basic",
+      "description": "Essential features for small pharmacies",
+      "price": 0,
+      "isActive": true,
+      "isDefault": true,
+      "displayOrder": 1,
+      "maxUsers": 1,
+      "maxBranches": 1,
+      "maxProducts": 500,
+      "durationDays": 365,
+      "maxActivations": 1
+    },
+    {
+      "id": "tier-uuid",
+      "code": "STANDARD",
+      "name": "Standard",
+      "description": "For growing pharmacies",
+      "price": 499,
+      "isActive": true,
+      "displayOrder": 2,
+      "maxUsers": 3,
+      "maxBranches": 1,
+      "maxProducts": 5000,
+      ...
+    },
+    ...
+  ]
+}`}</pre>
+              </div>
             </div>
           </div>
         </div>
