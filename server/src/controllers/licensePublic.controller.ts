@@ -186,6 +186,7 @@ export async function activateLicense(req: Request, res: Response): Promise<void
     // Validate format
     const formatValidation = validateLicenseKeyFormat(licenseKey);
     if (!formatValidation.isValid) {
+      await logVerification(licenseKey, req, false, formatValidation.error || 'Invalid format');
       sendError(res, formatValidation.error || 'Invalid license key format', 400);
       return;
     }
