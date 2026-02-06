@@ -4,6 +4,18 @@ import path from 'path';
 // Load environment variables
 dotenv.config({ path: path.join(__dirname, '../../.env') });
 
+// Parse CORS origins (supports comma-separated list)
+const parseCorsOrigins = (origins: string | undefined): string | string[] => {
+  if (!origins) return 'http://localhost:3300';
+
+  // If it contains commas, split into array
+  if (origins.includes(',')) {
+    return origins.split(',').map(origin => origin.trim());
+  }
+
+  return origins;
+};
+
 export const config = {
   // Server
   port: parseInt(process.env.PORT || '5001', 10),
@@ -23,9 +35,9 @@ export const config = {
     secretKey: process.env.LICENSE_SECRET_KEY || 'default-license-secret',
   },
 
-  // CORS
+  // CORS - supports single origin or comma-separated list
   cors: {
-    origin: process.env.CORS_ORIGIN || 'http://localhost:3300',
+    origin: parseCorsOrigins(process.env.CORS_ORIGIN),
   },
 
   // Rate Limiting

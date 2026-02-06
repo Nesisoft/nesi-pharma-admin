@@ -10,8 +10,10 @@ import { errorHandler, notFoundHandler } from './middleware/errorHandler';
 
 const app = express();
 
-// Security middleware
-app.use(helmet());
+// Security middleware - configure for serverless
+app.use(helmet({
+  crossOriginResourcePolicy: { policy: 'cross-origin' },
+}));
 
 // CORS configuration for public license endpoints (allow any origin)
 // These endpoints are called by pharmacy client applications from various domains
@@ -28,6 +30,14 @@ const adminCorsOptions: cors.CorsOptions = {
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization'],
 };
+
+// Handle preflight requests explicitly for all routes
+app.options('*', (req, res, next) => {
+  if (req.path.startsWith('/api/public')) {
+    return cors(publicCorsOptions)(req, res, next);
+  }
+  return cors(adminCorsOptions)(req, res, next);
+});
 
 // Apply CORS based on route - public routes get permissive CORS, admin routes get restricted
 app.use((req, res, next) => {
