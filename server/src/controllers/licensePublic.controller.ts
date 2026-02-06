@@ -1,5 +1,5 @@
 import { Request, Response } from 'express';
-import { LicenseStatus, AuditAction, PharmacyStatus } from '@prisma/client';
+import { LicenseStatus, AuditAction, PharmacyStatus, Prisma } from '@prisma/client';
 import prisma from '../lib/prisma';
 import { validateLicenseKeyFormat } from '../utils/licenseKey';
 import { sendSuccess, sendError } from '../utils/apiResponse';
@@ -328,7 +328,7 @@ export async function activateLicense(req: Request, res: Response): Promise<void
         validFrom: license.validFrom || now,
         validUntil: expiresAt,
         expiresAt,
-        features: freshFeatures, // Update cached features with fresh DB values
+        features: freshFeatures as Prisma.InputJsonValue, // Update cached features with fresh DB values
       },
     });
 

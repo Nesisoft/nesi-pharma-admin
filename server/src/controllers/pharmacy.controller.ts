@@ -1,5 +1,5 @@
 import { Request, Response } from 'express';
-import { PharmacyStatus, AuditAction } from '@prisma/client';
+import { PharmacyStatus, AuditAction, Prisma } from '@prisma/client';
 import prisma from '../lib/prisma';
 import {
   sendSuccess,
@@ -218,8 +218,8 @@ export async function updatePharmacy(req: Request, res: Response): Promise<void>
         entityId: id,
         adminUserId: req.user?.id,
         description: `Updated pharmacy: ${pharmacy.name}`,
-        previousValue: existing,
-        newValue: updateData,
+        previousValue: existing as unknown as Prisma.InputJsonValue,
+        newValue: updateData as Prisma.InputJsonValue,
         ipAddress: req.ip,
         userAgent: req.headers['user-agent'],
       },

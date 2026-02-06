@@ -111,6 +111,13 @@ export function sendServerError(res: Response, message = 'Internal server error'
   return sendError(res, message, 500);
 }
 
+/**
+ * Send created response (201)
+ */
+export function sendCreated<T>(res: Response, data?: T, message?: string): Response {
+  return sendSuccess(res, data, message, 201);
+}
+
 export default {
   sendSuccess,
   sendPaginatedSuccess,
@@ -120,4 +127,5 @@ export default {
   sendUnauthorized,
   sendForbidden,
   sendServerError,
+  sendCreated,
 };
