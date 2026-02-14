@@ -226,7 +226,8 @@ export async function activateLicense(req: Request, res: Response): Promise<void
 
     // Check pharmacy status if assigned
     if (license.pharmacy && license.pharmacy.status !== PharmacyStatus.ACTIVE) {
-      sendError(res, `Pharmacy account is ${license.pharmacy.status.toLowerCase()}. Contact support to reactivate.`, 403);
+      const statusText = license.pharmacy.status ? license.pharmacy.status.toLowerCase() : 'inactive';
+      sendError(res, `Pharmacy account is ${statusText}. Contact support to reactivate.`, 403);
       return;
     }
 
@@ -267,18 +268,20 @@ export async function activateLicense(req: Request, res: Response): Promise<void
 
     // Create or find pharmacy if data provided
     let pharmacyId = license.pharmacyId;
-    if (pharmacyData && !pharmacyId) {
+    if (pharmacyData && pharmacyData.email && !pharmacyId) {
+      const pharmacyEmail = pharmacyData.email.toLowerCase();
+
       // Try to find existing pharmacy by email
       let pharmacy = await prisma.pharmacy.findUnique({
-        where: { email: pharmacyData.email.toLowerCase() },
+        where: { email: pharmacyEmail },
       });
 
       if (!pharmacy) {
         // Create new pharmacy
         pharmacy = await prisma.pharmacy.create({
           data: {
-            name: pharmacyData.name,
-            email: pharmacyData.email.toLowerCase(),
+            name: pharmacyData.name || 'Unknown Pharmacy',
+            email: pharmacyEmail,
             phone: pharmacyData.phone,
             address: pharmacyData.address,
             city: pharmacyData.city,
@@ -290,7 +293,8 @@ export async function activateLicense(req: Request, res: Response): Promise<void
         });
       } else if (pharmacy.status !== PharmacyStatus.ACTIVE) {
         // Existing pharmacy is not active
-        sendError(res, `Pharmacy account is ${pharmacy.status.toLowerCase()}. Contact support to reactivate.`, 403);
+        const statusText = pharmacy.status ? pharmacy.status.toLowerCase() : 'inactive';
+        sendError(res, `Pharmacy account is ${statusText}. Contact support to reactivate.`, 403);
         return;
       }
       pharmacyId = pharmacy.id;
