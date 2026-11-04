@@ -47,4 +47,19 @@ export const config = {
   },
 };
 
+// Never run production on the placeholder JWT secrets above: anyone who has
+// seen this code could sign their own admin tokens. (Changing them only signs
+// admins out.)
+if (config.isProduction) {
+  const missing = ['JWT_SECRET', 'JWT_REFRESH_SECRET'].filter((name) => !process.env[name]);
+  if (missing.length > 0) {
+    throw new Error(`Refusing to start: set ${missing.join(' and ')} in the production environment`);
+  }
+  // Not fatal: changing this secret invalidates every licence key already
+  // issued (activation checks the key checksum against it)
+  if (!process.env.LICENSE_SECRET_KEY) {
+    console.warn('WARNING: LICENSE_SECRET_KEY is not set; licence key checksums use the default secret');
+  }
+}
+
 export default config;
