@@ -45,3 +45,6 @@ server/prisma/migrations/
 # Misc
 *.tsbuildinfo
 .eslintcache
+
+# Vite dependency cache
+.vite/
