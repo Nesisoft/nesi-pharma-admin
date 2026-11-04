@@ -40,6 +40,20 @@ There are no automated tests yet.
   installed pharmacies.
 - Branch names describe the change: `feat/...`, `fix/...`, `chore/...`, `docs/...`.
 
+## Working agreements (the owner's rules - follow them on every machine)
+
+- Every change goes through a pull request from a descriptive branch; never commit to
+  `main` directly.
+- **Ask the owner before merging any PR and before deleting any branch or worktree.**
+  Merge with merge commits (`gh pr merge --merge`). Stacked PRs: merge them all first,
+  re-pointing each to `main`, and delete branches last. Deleting a base branch closes the
+  PRs stacked on it.
+- Commits are authored as `Anlimah <y.m.ratty7@gmail.com>`.
+- Merging to `main` may redeploy production (Vercel/Render): call out deploy-impacting
+  changes, such as new required environment variables, before asking to merge.
+- New PC setup (Node 22, GitHub CLI, cloning both repos side by side): see
+  `../nesi-pharma/README.md`.
+
 ## Gotchas
 
 - Production refuses to start without `JWT_SECRET` and `JWT_REFRESH_SECRET`
