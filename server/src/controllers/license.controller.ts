@@ -1,5 +1,5 @@
 import { Request, Response } from 'express';
-import { LicenseTier, LicenseStatus, AuditAction } from '@prisma/client';
+import { LicenseTier, LicenseStatus, AuditAction, Prisma } from '@prisma/client';
 import prisma from '../lib/prisma';
 import {
   generateLicenseKey,
@@ -200,7 +200,7 @@ export async function generateLicense(req: Request, res: Response): Promise<void
         maxActivations: licenseMaxActivations,
         pharmacyId: pharmacyId || null,
         notes,
-        features: licenseFeatures,
+        features: licenseFeatures as Prisma.InputJsonValue,
         generatedById: req.user?.id,
       },
       include: {
@@ -303,7 +303,7 @@ export async function generateBulkLicenses(req: Request, res: Response): Promise
             durationDays: licenseDurationDays,
             maxActivations: licenseMaxActivations,
             notes,
-            features,
+            features: features as Prisma.InputJsonValue,
             generatedById: req.user?.id,
           },
         })
@@ -372,7 +372,7 @@ export async function updateLicense(req: Request, res: Response): Promise<void> 
 
     const license = await prisma.license.update({
       where: { id },
-      data: updateData,
+      data: updateData as Prisma.LicenseUpdateInput,
       include: {
         pharmacy: {
           select: {
@@ -392,8 +392,8 @@ export async function updateLicense(req: Request, res: Response): Promise<void> 
         entityId: license.id,
         adminUserId: req.user?.id,
         description: `Updated license: ${maskLicenseKey(license.licenseKey)}`,
-        previousValue: existing,
-        newValue: updateData,
+        previousValue: existing as Prisma.InputJsonValue,
+        newValue: updateData as Prisma.InputJsonValue,
         ipAddress: req.ip,
         userAgent: req.headers['user-agent'],
       },

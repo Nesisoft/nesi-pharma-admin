@@ -51,7 +51,7 @@ export async function getFeature(req: Request, res: Response): Promise<void> {
             tier: {
               select: {
                 id: true,
-                tier: true,
+                code: true,
                 name: true,
               },
             },

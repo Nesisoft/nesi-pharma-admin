@@ -1,6 +1,6 @@
 import { Request, Response } from 'express';
 import bcrypt from 'bcryptjs';
-import { AdminRole, AuditAction } from '@prisma/client';
+import { AdminRole, AuditAction, Prisma } from '@prisma/client';
 import prisma from '../lib/prisma';
 import {
   sendSuccess,
@@ -248,8 +248,8 @@ export async function updateAdminUser(req: Request, res: Response): Promise<void
         entityId: id,
         adminUserId: req.user?.id,
         description: `Updated admin user: ${existing.email}`,
-        previousValue: { firstName: existing.firstName, lastName: existing.lastName, role: existing.role },
-        newValue: updateData,
+        previousValue: { firstName: existing.firstName, lastName: existing.lastName, role: existing.role } as Prisma.InputJsonValue,
+        newValue: updateData as Prisma.InputJsonValue,
         ipAddress: req.ip,
         userAgent: req.headers['user-agent'],
       },

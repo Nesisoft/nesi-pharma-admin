@@ -1,5 +1,5 @@
 import { Request, Response } from 'express';
-import { AuditAction } from '@prisma/client';
+import { AuditAction, Prisma } from '@prisma/client';
 import prisma from '../lib/prisma';
 import {
   sendSuccess,
@@ -281,8 +281,8 @@ export async function updateTierConfig(req: Request, res: Response): Promise<voi
         entityId: tierConfig.id,
         adminUserId: req.user?.id,
         description: `Updated ${code} tier configuration`,
-        previousValue: existing,
-        newValue: updateData,
+        previousValue: existing as unknown as Prisma.InputJsonValue,
+        newValue: updateData as Prisma.InputJsonValue,
         ipAddress: req.ip,
         userAgent: req.headers['user-agent'],
       },
