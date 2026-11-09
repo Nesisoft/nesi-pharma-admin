@@ -38,6 +38,11 @@ There are no automated tests yet.
 - Feature keys and tier codes are consumed by the desktop app
   (`../nesi-pharma/src/config/features.js`). Renaming one is a breaking change for
   installed pharmacies.
+- Which features a plan includes is data, edited on the Tier Configs page (tier features).
+  Activation (`getTierFeaturesFromDb`) and the public `GET /api/public/license/plans`
+  (the desktop's plan comparison) both read it, and share `tierLimits()` (an empty limit
+  means unlimited and is sent as `-1`). Keep the `/plans` response backward compatible:
+  installed apps read it.
 - Branch names describe the change: `feat/...`, `fix/...`, `chore/...`, `docs/...`.
 
 ## Working agreements (the owner's rules - follow them on every machine)
