@@ -3,22 +3,7 @@ import { LicenseStatus, AuditAction, PharmacyStatus, Prisma } from '@prisma/clie
 import prisma from '../lib/prisma';
 import { validateLicenseKeyFormat } from '../utils/licenseKey';
 import { sendSuccess, sendError } from '../utils/apiResponse';
-
-/**
- * A plan's limits as the pharmacy app expects them. Shared by activation and
- * the public plan list, so the app shows exactly what a licence for that plan
- * grants. An empty limit means unlimited (the seed and the Tier Configs page
- * treat it so), which the app writes as -1. (Activation used to send 1 user,
- * 1 branch and 500 products instead, e.g. for every Enterprise licence.)
- */
-function tierLimits(tierConfig: { maxUsers: number | null; maxBranches: number | null; maxProducts: number | null }) {
-  const limit = (value: number | null) => (value === null ? -1 : value);
-  return {
-    maxUsers: limit(tierConfig.maxUsers),
-    maxBranches: limit(tierConfig.maxBranches),
-    maxProducts: limit(tierConfig.maxProducts),
-  };
-}
+import { tierLimits } from '../utils/tierLimits';
 
 /**
  * Get features for a license tier from the database
