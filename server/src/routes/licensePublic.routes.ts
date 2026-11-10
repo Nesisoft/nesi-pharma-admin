@@ -17,4 +17,7 @@ router.post('/deactivate', licensePublicController.deactivateLicense);
 // Get tier features/pricing info
 router.get('/tiers', licensePublicController.getTierFeatures);
 
+// Plans on offer with their limits and features, for the app's plan comparison
+router.get('/plans', licensePublicController.getPlans);
+
 export default router;

@@ -3,6 +3,7 @@ import { LicenseStatus, AuditAction, PharmacyStatus, Prisma } from '@prisma/clie
 import prisma from '../lib/prisma';
 import { validateLicenseKeyFormat } from '../utils/licenseKey';
 import { sendSuccess, sendError } from '../utils/apiResponse';
+import { tierLimits } from '../utils/tierLimits';
 
 /**
  * Get features for a license tier from the database
@@ -33,9 +34,7 @@ async function getTierFeaturesFromDb(tierCode: string): Promise<Record<string, u
     // Build features object from database
     const features: Record<string, unknown> = {
       // Include limits from tier config
-      maxUsers: tierConfig.maxUsers ?? 1,
-      maxBranches: tierConfig.maxBranches ?? 1,
-      maxProducts: tierConfig.maxProducts ?? 500,
+      ...tierLimits(tierConfig),
     };
 
     // Add feature flags from TierFeature join table
@@ -468,6 +467,54 @@ export async function getTierFeatures(req: Request, res: Response): Promise<void
   }
 }
 
+/**
+ * GET /api/public/license/plans
+ * The plans on offer and what each one includes, for the pharmacy app's plan
+ * comparison (Settings > License). Built from the same tier configs and tier
+ * features as activation, so the app never shows a feature that a licence
+ * for that plan wouldn't grant. Public, so only names, prices, limits and
+ * feature switches.
+ */
+export async function getPlans(req: Request, res: Response): Promise<void> {
+  try {
+    const [tiers, catalogue] = await Promise.all([
+      prisma.licenseTierConfig.findMany({
+        where: { isActive: true, archivedAt: null },
+        orderBy: [{ displayOrder: 'asc' }, { price: 'asc' }],
+        include: {
+          tierFeatures: { select: { isEnabled: true, feature: { select: { key: true } } } },
+        },
+      }),
+      prisma.feature.findMany({
+        where: { isActive: true, archivedAt: null },
+        orderBy: [{ category: 'asc' }, { name: 'asc' }],
+        select: { key: true, name: true, description: true, category: true },
+      }),
+    ]);
+
+    const plans = tiers.map((tier) => {
+      const enabled = new Set(tier.tierFeatures.filter((tf) => tf.isEnabled).map((tf) => tf.feature.key));
+      return {
+        code: tier.code,
+        name: tier.name,
+        description: tier.description,
+        price: tier.price.toString(),
+        currency: tier.currency,
+        durationDays: tier.durationDays,
+        color: tier.color,
+        limits: tierLimits(tier),
+        // Every active feature, so a missing switch reads as "not included"
+        features: Object.fromEntries(catalogue.map((feature) => [feature.key, enabled.has(feature.key)])),
+      };
+    });
+
+    sendSuccess(res, { plans, features: catalogue });
+  } catch (error) {
+    console.error('Get plans error:', error);
+    sendError(res, 'Failed to fetch plans', 500);
+  }
+}
+
 // Helper functions
 async function logVerification(
   licenseKey: string,
@@ -515,4 +562,5 @@ export default {
   activateLicense,
   deactivateLicense,
   getTierFeatures,
+  getPlans,
 };

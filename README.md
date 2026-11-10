@@ -58,7 +58,8 @@ Base path `/api/public/license`, no authentication, rate limited.
 | `POST /verify` | `{ licenseKey, deviceId }` - is this key valid for this device; returns tier and features |
 | `POST /activate` | `{ licenseKey, deviceId, deviceName, pharmacy }` - bind the key to a device |
 | `POST /deactivate` | `{ licenseKey, deviceId }` - release a device activation |
-| `GET /tiers` | Tier definitions with their features and limits |
+| `GET /tiers` | Tier definitions (kept for older app versions) |
+| `GET /plans` | `{ plans, features }`: each active plan with its limits (`-1` = unlimited) and every active feature switched on or off, plus the feature catalogue. The app's plan comparison (Settings > License) is built from it |
 
 Request and response details: `server/src/controllers/licensePublic.controller.ts`.
 Keys look like `XXXX-XXXX-XXXX-XXXX-XXXX`; the first character encodes the tier and the

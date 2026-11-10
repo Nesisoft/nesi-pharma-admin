@@ -1,6 +1,7 @@
 import { Request, Response } from 'express';
 import { LicenseTier, LicenseStatus, AuditAction, Prisma } from '@prisma/client';
 import prisma from '../lib/prisma';
+import { tierLimits } from '../utils/tierLimits';
 import {
   generateLicenseKey,
   generateBulkLicenseKeys,
@@ -628,10 +629,8 @@ async function getTierFeaturesFromDb(tierCode: string): Promise<Record<string, u
     if (tierConfig && tierConfig.tierFeatures.length > 0) {
       // Build features object from database
       const features: Record<string, unknown> = {
-        // Include limits from tier config
-        maxUsers: tierConfig.maxUsers ?? (tierCode === 'ENTERPRISE' ? -1 : 1),
-        maxBranches: tierConfig.maxBranches ?? (tierCode === 'ENTERPRISE' ? -1 : 1),
-        maxProducts: tierConfig.maxProducts ?? 500,
+        // Include limits from tier config (the same values activation sends)
+        ...tierLimits(tierConfig),
       };
 
       // Add feature flags
