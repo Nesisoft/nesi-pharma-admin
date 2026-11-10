@@ -158,6 +158,12 @@ const tierFeatureMapping: Record<string, string[]> = {
 async function main() {
   console.log('Starting database seed...');
 
+  // The default admin login below is public (it's in this file): a production
+  // database must get its own
+  if (process.env.NODE_ENV === 'production' && (!process.env.ADMIN_EMAIL || !process.env.ADMIN_PASSWORD)) {
+    throw new Error('Set ADMIN_EMAIL and ADMIN_PASSWORD to seed a production database');
+  }
+
   // Create default super admin user
   const adminEmail = process.env.ADMIN_EMAIL || 'admin@nesipharma.com';
   const adminPassword = process.env.ADMIN_PASSWORD || 'Admin@123456';

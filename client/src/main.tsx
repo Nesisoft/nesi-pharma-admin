@@ -1,52 +1,18 @@
-import React from 'react';
+import React, { Suspense, lazy } from 'react';
 import ReactDOM from 'react-dom/client';
-import { BrowserRouter } from 'react-router-dom';
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { Toaster } from 'react-hot-toast';
-import App from './App';
-import { AuthProvider } from './contexts/AuthContext';
+import { ADMIN_BASE } from './lib/config';
 import './index.css';
 
-const queryClient = new QueryClient({
-  defaultOptions: {
-    queries: {
-      retry: 1,
-      refetchOnWindowFocus: false,
-      staleTime: 5 * 60 * 1000, // 5 minutes
-    },
-  },
-});
+// One site, two apps: the Adurofie PMS landing page at / and the admin dashboard
+// under /admin. Each loads only its own code.
+const path = window.location.pathname;
+const isAdmin = path === ADMIN_BASE || path.startsWith(`${ADMIN_BASE}/`);
+const Page = isAdmin ? lazy(() => import('./AdminApp')) : lazy(() => import('./landing/LandingPage'));
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
-    <QueryClientProvider client={queryClient}>
-      <BrowserRouter>
-        <AuthProvider>
-          <App />
-          <Toaster
-            position="top-right"
-            toastOptions={{
-              duration: 4000,
-              style: {
-                background: '#363636',
-                color: '#fff',
-              },
-              success: {
-                iconTheme: {
-                  primary: '#22c55e',
-                  secondary: '#fff',
-                },
-              },
-              error: {
-                iconTheme: {
-                  primary: '#ef4444',
-                  secondary: '#fff',
-                },
-              },
-            }}
-          />
-        </AuthProvider>
-      </BrowserRouter>
-    </QueryClientProvider>
+    <Suspense fallback={<div className="min-h-screen bg-white" />}>
+      <Page />
+    </Suspense>
   </React.StrictMode>
 );

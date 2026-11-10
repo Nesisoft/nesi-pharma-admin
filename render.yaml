@@ -1,0 +1,45 @@
+# Render Blueprint for the API server (server/). Create it from the Render
+# dashboard: New > Blueprint > this repository.
+#
+# The website (landing page at /, admin at /admin) is on Vercel (client/vercel.json),
+# which forwards https://pharma.nesisoft.com/api/* to this service, so browsers and the
+# desktop app only ever use pharma.nesisoft.com. The database is Supabase Postgres.
+services:
+  - type: web
+    name: nesisoft-pharma-api
+    runtime: node
+    plan: free
+    # Keep the server next to the database: use the Render region closest to the
+    # Supabase project's region (Frankfurt for eu-central-1).
+    region: frankfurt
+    rootDir: server
+    # db push applies the Prisma schema (there are no migrations yet); the seed runs
+    # only on a database without admin users (prisma/seed-if-empty.ts)
+    buildCommand: npm ci && npm run build && npx prisma db push --skip-generate && npm run db:seed-if-empty
+    startCommand: npm start
+    healthCheckPath: /api/health
+    envVars:
+      - key: NODE_VERSION
+        value: "22"
+      - key: NODE_ENV
+        value: production
+      # Supabase > Connect > Session pooler (port 5432, works over IPv4)
+      - key: DATABASE_URL
+        sync: false
+      - key: JWT_SECRET
+        generateValue: true
+      - key: JWT_REFRESH_SECRET
+        generateValue: true
+      # Never change it once licences are issued: activation checks key checksums with it
+      - key: LICENSE_SECRET_KEY
+        generateValue: true
+      - key: CORS_ORIGIN
+        value: https://pharma.nesisoft.com
+      # Vercel + Render's load balancer: see GET /api/health
+      - key: TRUST_PROXY
+        value: "2"
+      # The first super admin, created by the seed on a new database
+      - key: ADMIN_EMAIL
+        sync: false
+      - key: ADMIN_PASSWORD
+        sync: false
