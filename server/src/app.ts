@@ -83,12 +83,13 @@ if (config.nodeEnv !== 'test' && !process.env.VERCEL) {
   app.use(morgan(config.isProduction ? 'combined' : 'dev'));
 }
 
-// Trust proxy (for rate limiting behind reverse proxy)
-app.set('trust proxy', 1);
+// Trust proxy (for rate limiting behind reverse proxy): TRUST_PROXY hops
+app.set('trust proxy', config.trustProxy);
 
-// Health check endpoint
+// Health check endpoint. `ip` is the caller's address as the server sees it:
+// if it isn't your own public IP, TRUST_PROXY doesn't match the proxies in front.
 app.get('/api/health', (req, res) => {
-  res.json({ status: 'ok', timestamp: new Date().toISOString() });
+  res.json({ status: 'ok', timestamp: new Date().toISOString(), ip: req.ip });
 });
 
 // API routes

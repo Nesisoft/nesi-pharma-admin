@@ -45,6 +45,11 @@ export const config = {
     windowMs: parseInt(process.env.RATE_LIMIT_WINDOW_MS || '900000', 10),
     maxRequests: parseInt(process.env.RATE_LIMIT_MAX_REQUESTS || '100', 10),
   },
+
+  // How many proxies sit in front of the server, so req.ip (rate limits, audit
+  // logs) is the visitor's address: 1 on Render, 2 when Vercel forwards
+  // pharma.nesisoft.com/api to Render. GET /api/health shows the result.
+  trustProxy: Math.max(0, parseInt(process.env.TRUST_PROXY || '1', 10) || 0),
 };
 
 // Never run production on the placeholder JWT secrets above: anyone who has

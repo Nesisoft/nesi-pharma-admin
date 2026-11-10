@@ -1,6 +1,8 @@
 import axios, { AxiosError, InternalAxiosRequestConfig } from 'axios';
+import { ADMIN_BASE, API_BASE_URL } from './config';
 
-const API_BASE_URL = import.meta.env.VITE_API_URL || '/api';
+// Full page load of the admin login (also clears any in-memory state)
+const LOGIN_URL = `${ADMIN_BASE}/login`;
 
 export const api = axios.create({
   baseURL: API_BASE_URL,
@@ -48,12 +50,12 @@ api.interceptors.response.use(
           // Refresh failed, clear tokens and redirect to login
           localStorage.removeItem('accessToken');
           localStorage.removeItem('refreshToken');
-          window.location.href = '/login';
+          window.location.href = LOGIN_URL;
           return Promise.reject(refreshError);
         }
       } else {
         // No refresh token, redirect to login
-        window.location.href = '/login';
+        window.location.href = LOGIN_URL;
       }
     }
 
