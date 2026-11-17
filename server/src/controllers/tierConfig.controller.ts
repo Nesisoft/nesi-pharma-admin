@@ -491,23 +491,25 @@ export async function updateTierFeatures(req: Request, res: Response): Promise<v
       return;
     }
 
-    // Process each feature
-    for (const { featureId, isEnabled } of features) {
-      await prisma.tierFeature.upsert({
-        where: {
-          tierId_featureId: {
+    // All or nothing: licence checks read the plan while this runs
+    await prisma.$transaction(
+      features.map(({ featureId, isEnabled }: { featureId: string; isEnabled: boolean }) =>
+        prisma.tierFeature.upsert({
+          where: {
+            tierId_featureId: {
+              tierId: tierConfig.id,
+              featureId,
+            },
+          },
+          update: { isEnabled },
+          create: {
             tierId: tierConfig.id,
             featureId,
+            isEnabled,
           },
-        },
-        update: { isEnabled },
-        create: {
-          tierId: tierConfig.id,
-          featureId,
-          isEnabled,
-        },
-      });
-    }
+        })
+      )
+    );
 
     // Fetch updated tier with features
     const updatedTier = await prisma.licenseTierConfig.findUnique({
@@ -568,11 +570,6 @@ export async function syncTierFeatures(req: Request, res: Response): Promise<voi
       where: { archivedAt: null },
     });
 
-    // Delete existing tier features
-    await prisma.tierFeature.deleteMany({
-      where: { tierId: tierConfig.id },
-    });
-
     // Create new tier features based on the provided feature IDs
     const tierFeaturesToCreate = allFeatures.map((feature) => ({
       tierId: tierConfig.id,
@@ -580,9 +577,18 @@ export async function syncTierFeatures(req: Request, res: Response): Promise<voi
       isEnabled: featureIds.includes(feature.id),
     }));
 
-    await prisma.tierFeature.createMany({
-      data: tierFeaturesToCreate,
-    });
+    // Replace the plan's features in one transaction. Licence checks read the
+    // plan at any time: between a separate delete and create they would find
+    // a plan with no features, and the desktop app would switch every paid
+    // feature off until its next check.
+    await prisma.$transaction([
+      prisma.tierFeature.deleteMany({
+        where: { tierId: tierConfig.id },
+      }),
+      prisma.tierFeature.createMany({
+        data: tierFeaturesToCreate,
+      }),
+    ]);
 
     // Fetch updated tier with features
     const updatedTier = await prisma.licenseTierConfig.findUnique({
