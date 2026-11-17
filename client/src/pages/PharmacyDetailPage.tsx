@@ -6,6 +6,7 @@ import LoadingSpinner from '@/components/ui/LoadingSpinner';
 import { format } from 'date-fns';
 import clsx from 'clsx';
 import toast from 'react-hot-toast';
+import { licenceStatusColors, licenceStatusLabels } from '@/lib/licence';
 import {
   ArrowLeftIcon,
   PencilIcon,
@@ -142,14 +143,18 @@ export default function PharmacyDetailPage() {
                 <table className="table">
                   <thead><tr><th>License Key</th><th>Tier</th><th>Status</th><th>Expires</th></tr></thead>
                   <tbody className="divide-y divide-gray-200 bg-white">
-                    {pharmacy.licenses.map((license: { id: string; licenseKey: string; tier: string; status: string; expiresAt: string | null }) => (
+                    {pharmacy.licenses.map((license: { id: string; licenseKey: string; tier: string; status: string; effectiveStatus?: string; expiresAt: string | null }) => {
+                      // The status it really has now (an ACTIVE licence past its date is EXPIRED)
+                      const licenceStatus = license.effectiveStatus || license.status;
+                      return (
                       <tr key={license.id}>
                         <td><Link to={`/licenses/${license.id}`} className="text-primary-600 font-mono text-sm">{license.licenseKey}</Link></td>
                         <td><span className={clsx('badge', tierColors[license.tier])}>{license.tier}</span></td>
-                        <td><span className={clsx('badge', statusColors[license.status])}>{license.status}</span></td>
+                        <td><span className={clsx('badge', licenceStatusColors[licenceStatus])}>{licenceStatusLabels[licenceStatus] || licenceStatus}</span></td>
                         <td className="text-gray-500">{license.expiresAt ? format(new Date(license.expiresAt), 'MMM d, yyyy') : '-'}</td>
                       </tr>
-                    ))}
+                      );
+                    })}
                   </tbody>
                 </table>
               ) : (

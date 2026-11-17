@@ -1,7 +1,8 @@
 import { Request, Response } from 'express';
-import { LicenseStatus, PharmacyStatus } from '@prisma/client';
+import { PharmacyStatus } from '@prisma/client';
 import prisma from '../lib/prisma';
 import { sendSuccess, sendError } from '../utils/apiResponse';
+import { activeNowWhere, expiringWithinWhere } from '../utils/licenseStatus';
 
 /**
  * Get dashboard overview statistics
@@ -38,7 +39,9 @@ export async function getDashboardStats(req: Request, res: Response): Promise<vo
     ] = await Promise.all([
       // Licenses
       prisma.license.count(),
-      prisma.license.count({ where: { status: LicenseStatus.ACTIVE } }),
+      // Active and not past the expiry date (the stored status only turns
+      // EXPIRED when someone verifies or activates the licence)
+      prisma.license.count({ where: activeNowWhere(now) }),
       prisma.license.groupBy({
         by: ['tier'],
         _count: { id: true },
@@ -72,15 +75,7 @@ export async function getDashboardStats(req: Request, res: Response): Promise<vo
       }),
 
       // Expiring soon
-      prisma.license.count({
-        where: {
-          status: LicenseStatus.ACTIVE,
-          expiresAt: {
-            gte: now,
-            lte: new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000),
-          },
-        },
-      }),
+      prisma.license.count({ where: expiringWithinWhere(30, now) }),
     ]);
 
     const tierStats = Object.fromEntries(

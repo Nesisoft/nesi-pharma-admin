@@ -7,6 +7,7 @@ import {
   sendError,
   sendNotFound,
 } from '../utils/apiResponse';
+import { withEffectiveStatus } from '../utils/licenseStatus';
 
 /**
  * Get all pharmacies with pagination and filters
@@ -100,7 +101,12 @@ export async function getPharmacy(req: Request, res: Response): Promise<void> {
       return;
     }
 
-    sendSuccess(res, pharmacy);
+    // Each licence with the status it really has now (past its date: EXPIRED)
+    const now = new Date();
+    sendSuccess(res, {
+      ...pharmacy,
+      licenses: pharmacy.licenses.map((license) => withEffectiveStatus(license, now)),
+    });
   } catch (error) {
     console.error('Get pharmacy error:', error);
     sendError(res, 'Failed to fetch pharmacy', 500);

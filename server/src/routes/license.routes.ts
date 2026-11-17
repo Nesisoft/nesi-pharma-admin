@@ -21,6 +21,10 @@ router.post('/generate-bulk', requireAdmin, licenseController.generateBulkLicens
 // Update and manage licenses (admin only)
 router.put('/:id', requireAdmin, licenseController.updateLicense);
 router.post('/:id/revoke', requireAdmin, licenseController.revokeLicense);
+router.post('/:id/renew', requireAdmin, licenseController.renewLicense);
+router.post('/:id/suspend', requireAdmin, licenseController.suspendLicense);
+router.post('/:id/unsuspend', requireAdmin, licenseController.unsuspendLicense);
+router.post('/:id/activations/:activationId/deactivate', requireAdmin, licenseController.deactivateActivation);
 router.delete('/:id', requireAdmin, licenseController.deleteLicense);
 
 export default router;
