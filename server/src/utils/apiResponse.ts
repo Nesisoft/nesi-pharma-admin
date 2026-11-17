@@ -5,6 +5,8 @@ export interface ApiResponse<T = unknown> {
   message?: string;
   data?: T;
   error?: string;
+  // A machine-readable reason (public licence API), next to the English `error`
+  code?: string;
   errors?: Record<string, string[]>;
   meta?: {
     page?: number;
@@ -74,6 +76,24 @@ export function sendError(
 }
 
 /**
+ * Send an error with a machine-readable code: { success: false, error, code }.
+ * Clients should test the code, not the English text.
+ */
+export function sendCodedError(
+  res: Response,
+  statusCode: number,
+  code: string,
+  message: string
+): Response {
+  const response: ApiResponse = {
+    success: false,
+    error: message,
+    code,
+  };
+  return res.status(statusCode).json(response);
+}
+
+/**
  * Send validation error response
  */
 export function sendValidationError(
@@ -122,6 +142,7 @@ export default {
   sendSuccess,
   sendPaginatedSuccess,
   sendError,
+  sendCodedError,
   sendValidationError,
   sendNotFound,
   sendUnauthorized,

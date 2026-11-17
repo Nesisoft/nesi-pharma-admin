@@ -55,6 +55,7 @@ if (!process.env.VERCEL) {
     message: {
       success: false,
       error: 'Too many requests, please try again later.',
+      code: 'RATE_LIMITED',
     },
     standardHeaders: true,
     legacyHeaders: false,
@@ -68,6 +69,7 @@ if (!process.env.VERCEL) {
     message: {
       success: false,
       error: 'Too many verification requests, please try again later.',
+      code: 'RATE_LIMITED',
     },
   });
 
