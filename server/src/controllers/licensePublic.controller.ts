@@ -4,78 +4,62 @@ import prisma from '../lib/prisma';
 import { validateLicenseKeyFormat } from '../utils/licenseKey';
 import { sendSuccess, sendError } from '../utils/apiResponse';
 import { tierLimits } from '../utils/tierLimits';
+import {
+  LicenceRefusal,
+  isRefusal,
+  pharmacyActivationText,
+  pharmacyRefusalCode,
+  refuse,
+  sendLicenceError,
+  sendRefusal,
+} from '../utils/licenseErrors';
+import { addDays, effectiveStatus } from '../utils/licenseStatus';
+import { LICENCE_TX_OPTIONS, countActiveActivations, lockLicence } from '../utils/licenseTx';
+import { readPlanFeatures } from '../utils/licensePlan';
+
+/** A short text from the request body, or null */
+function bodyText(value: unknown, max = 255): string | null {
+  if (typeof value !== 'string') return null;
+  const text = value.trim();
+  return text ? text.slice(0, max) : null;
+}
 
 /**
- * Get features for a license tier from the database
- * This ensures features are always fresh from the database, not cached
+ * The licence key from the request: missing, malformed (format, tier prefix
+ * or checksum) or the normalised key to look up
  */
-async function getTierFeaturesFromDb(tierCode: string): Promise<Record<string, unknown>> {
-  try {
-    const tierConfig = await prisma.licenseTierConfig.findUnique({
-      where: { code: tierCode },
-      include: {
-        tierFeatures: {
-          include: {
-            feature: {
-              select: {
-                key: true,
-                isActive: true,
-              },
-            },
-          },
-        },
-      },
-    });
-
-    if (!tierConfig) {
-      return {};
-    }
-
-    // Build features object from database
-    const features: Record<string, unknown> = {
-      // Include limits from tier config
-      ...tierLimits(tierConfig),
-    };
-
-    // Add feature flags from TierFeature join table
-    // Only include features that are active in the Feature table
-    for (const tf of tierConfig.tierFeatures) {
-      if (tf.feature.isActive) {
-        features[tf.feature.key] = tf.isEnabled;
-      }
-    }
-
-    return features;
-  } catch (error) {
-    console.error('Error fetching tier features from DB:', error);
-    return {};
+function readLicenceKey(licenseKey: unknown): { key: string } | LicenceRefusal {
+  if (licenseKey === undefined || licenseKey === null || licenseKey === '') {
+    return refuse('LICENSE_KEY_REQUIRED');
   }
+  if (typeof licenseKey !== 'string') return refuse('LICENSE_KEY_INVALID');
+  const formatValidation = validateLicenseKeyFormat(licenseKey);
+  if (!formatValidation.isValid) return refuse('LICENSE_KEY_INVALID', formatValidation.error);
+  return { key: licenseKey.trim().toUpperCase() };
 }
 
 /**
  * Verify a license key (public endpoint for pharmacy app)
+ *
+ * Desktop apps call it on a timer and at sign-in. Opt-in: a request that names
+ * its activation (activationId, sent by desktop 1.3.0 and later) is refused
+ * when that activation is unknown or no longer active; 1.1.0/1.2.0 send none.
  */
 export async function verifyLicense(req: Request, res: Response): Promise<void> {
   try {
-    const { licenseKey, deviceId } = req.body;
+    const { licenseKey, activationId } = req.body ?? {};
 
-    if (!licenseKey) {
-      sendError(res, 'License key is required', 400);
+    const checked = readLicenceKey(licenseKey);
+    if (isRefusal(checked)) {
+      if (checked.refusal === 'LICENSE_KEY_INVALID' && typeof licenseKey === 'string') {
+        await logVerification(licenseKey, req, false, checked.message || 'Invalid format');
+      }
+      sendRefusal(res, checked);
       return;
     }
 
-    // Validate format
-    const formatValidation = validateLicenseKeyFormat(licenseKey);
-    if (!formatValidation.isValid) {
-      // Log verification attempt
-      await logVerification(licenseKey, req, false, formatValidation.error || 'Invalid format');
-      sendError(res, formatValidation.error || 'Invalid license key format', 400);
-      return;
-    }
-
-    // Find license
     const license = await prisma.license.findUnique({
-      where: { licenseKey: licenseKey.toUpperCase() },
+      where: { licenseKey: checked.key },
       include: {
         pharmacy: {
           select: {
@@ -84,64 +68,75 @@ export async function verifyLicense(req: Request, res: Response): Promise<void> 
             status: true,
           },
         },
-        activations: {
-          where: { isActive: true },
-        },
       },
     });
 
     if (!license) {
-      await logVerification(licenseKey, req, false, 'License not found');
-      sendError(res, 'License key not found', 404);
+      sendLicenceError(res, 'LICENSE_NOT_FOUND');
       return;
     }
 
-    // Check license status
-    if (license.status === LicenseStatus.REVOKED) {
+    const status = effectiveStatus(license);
+
+    if (status === LicenseStatus.REVOKED) {
       await logVerificationById(license.id, req, false, 'License revoked');
-      sendError(res, 'License has been revoked', 403);
+      sendLicenceError(res, 'LICENSE_REVOKED');
       return;
     }
 
-    if (license.status === LicenseStatus.SUSPENDED) {
+    if (status === LicenseStatus.SUSPENDED) {
       await logVerificationById(license.id, req, false, 'License suspended');
-      sendError(res, 'License has been suspended', 403);
+      sendLicenceError(res, 'LICENSE_SUSPENDED');
       return;
     }
 
-    if (license.status === LicenseStatus.EXPIRED) {
+    if (status === LicenseStatus.EXPIRED) {
+      // Past its date but not marked yet: mark it, so admin pages agree
+      if (license.status !== LicenseStatus.EXPIRED) {
+        await prisma.license.update({
+          where: { id: license.id },
+          data: { status: LicenseStatus.EXPIRED },
+        });
+      }
       await logVerificationById(license.id, req, false, 'License expired');
-      sendError(res, 'License has expired', 403);
-      return;
-    }
-
-    // Check expiry date if set
-    if (license.expiresAt && new Date() > license.expiresAt) {
-      // Update status to expired
-      await prisma.license.update({
-        where: { id: license.id },
-        data: { status: LicenseStatus.EXPIRED },
-      });
-      await logVerificationById(license.id, req, false, 'License expired');
-      sendError(res, 'License has expired', 403);
+      sendLicenceError(res, 'LICENSE_EXPIRED');
       return;
     }
 
     // Check pharmacy status if assigned
     if (license.pharmacy && license.pharmacy.status !== PharmacyStatus.ACTIVE) {
       await logVerificationById(license.id, req, false, 'Pharmacy not active');
-      sendError(res, 'Pharmacy account is not active', 403);
+      sendLicenceError(res, pharmacyRefusalCode(license.pharmacy.status));
       return;
     }
 
-    // Log successful verification
+    if (activationId !== undefined && activationId !== null && activationId !== '') {
+      const activation =
+        typeof activationId === 'string'
+          ? await prisma.licenseActivation.findUnique({ where: { id: activationId } })
+          : null;
+      if (!activation || activation.licenseId !== license.id) {
+        await logVerificationById(license.id, req, false, 'Activation not found');
+        sendLicenceError(res, 'ACTIVATION_NOT_FOUND');
+        return;
+      }
+      if (!activation.isActive) {
+        await logVerificationById(license.id, req, false, 'Activation no longer active');
+        sendLicenceError(res, 'ACTIVATION_INACTIVE');
+        return;
+      }
+    }
+
+    // Fresh features from the plan: never "valid" without a plan
+    const freshFeatures = await readPlanFeatures(prisma, license);
+    if (!freshFeatures) {
+      await logVerificationById(license.id, req, false, 'Plan unavailable');
+      sendLicenceError(res, 'PLAN_UNAVAILABLE');
+      return;
+    }
+
     await logVerificationById(license.id, req, true, 'License valid');
 
-    // Get fresh features from database
-    const tierCode = license.tierCode || license.tier;
-    const freshFeatures = await getTierFeaturesFromDb(tierCode);
-
-    // Return license info with fresh features from database
     sendSuccess(res, {
       valid: true,
       license: {
@@ -160,293 +155,346 @@ export async function verifyLicense(req: Request, res: Response): Promise<void> 
     }, 'License is valid');
   } catch (error) {
     console.error('Verify license error:', error);
-    sendError(res, 'License verification failed', 500);
+    sendLicenceError(res, 'VERIFY_FAILED');
   }
 }
 
+type ActivationOutcome =
+  | LicenceRefusal
+  | {
+      alreadyActivated: boolean;
+      license: { tier: string; tierCode: string | null; validFrom: Date | null; expiresAt: Date | null };
+      features: Record<string, unknown>;
+      activation: { id: string; deviceName: string | null; activatedAt: Date };
+    };
+
 /**
  * Activate a license key (public endpoint for pharmacy app)
+ *
+ * - Only the first activation starts the licence's term (expiresAt = now +
+ *   durationDays). Later activations (another PC, or the same PC after
+ *   deactivating) keep the expiry: extending a licence is the admin's Renew.
+ * - Revoked, suspended and expired licences (by status or by date) are refused
+ *   before any seat is looked at, and activation never lifts a status.
+ * - A PC that already holds an active seat (same deviceId; the hardware
+ *   fingerprint only when no deviceId is sent) gets that seat back.
+ * - The seat check and the new activation happen in one transaction with the
+ *   licence row locked, so concurrent requests can't exceed maxActivations.
  */
 export async function activateLicense(req: Request, res: Response): Promise<void> {
   try {
-    const {
-      licenseKey,
-      deviceId,
-      deviceName,
-      deviceFingerprint,
-      pharmacy: pharmacyData,
-    } = req.body;
+    const { licenseKey, pharmacy: pharmacyData } = req.body ?? {};
+    const deviceId = bodyText(req.body?.deviceId);
+    const deviceName = bodyText(req.body?.deviceName);
+    const deviceFingerprint = bodyText(req.body?.deviceFingerprint, 2000);
 
-    if (!licenseKey) {
-      sendError(res, 'License key is required', 400);
+    const checked = readLicenceKey(licenseKey);
+    if (isRefusal(checked)) {
+      if (checked.refusal === 'LICENSE_KEY_INVALID' && typeof licenseKey === 'string') {
+        await logVerification(licenseKey, req, false, checked.message || 'Invalid format');
+      }
+      sendRefusal(res, checked);
       return;
     }
 
-    // Validate format
-    const formatValidation = validateLicenseKeyFormat(licenseKey);
-    if (!formatValidation.isValid) {
-      await logVerification(licenseKey, req, false, formatValidation.error || 'Invalid format');
-      sendError(res, formatValidation.error || 'Invalid license key format', 400);
+    const found = await prisma.license.findUnique({
+      where: { licenseKey: checked.key },
+      select: { id: true },
+    });
+    if (!found) {
+      sendLicenceError(res, 'LICENSE_NOT_FOUND');
       return;
     }
 
-    // Find license with pharmacy info
-    const license = await prisma.license.findUnique({
-      where: { licenseKey: licenseKey.toUpperCase() },
-      include: {
-        pharmacy: {
-          select: {
-            id: true,
-            name: true,
-            status: true,
+    const outcome = await prisma.$transaction(async (tx): Promise<ActivationOutcome> => {
+      await lockLicence(tx, found.id);
+
+      const license = await tx.license.findUnique({
+        where: { id: found.id },
+        include: {
+          pharmacy: {
+            select: {
+              id: true,
+              name: true,
+              status: true,
+            },
           },
         },
-        activations: {
-          where: { isActive: true },
-        },
-      },
-    });
+      });
+      if (!license) return refuse('LICENSE_NOT_FOUND');
 
-    if (!license) {
-      sendError(res, 'License key not found', 404);
-      return;
-    }
+      const now = new Date();
+      const status = effectiveStatus(license, now);
+      if (status === LicenseStatus.REVOKED) return refuse('LICENSE_REVOKED');
+      if (status === LicenseStatus.SUSPENDED) return refuse('LICENSE_SUSPENDED');
+      if (status === LicenseStatus.EXPIRED) {
+        if (license.status !== LicenseStatus.EXPIRED) {
+          await tx.license.update({
+            where: { id: license.id },
+            data: { status: LicenseStatus.EXPIRED },
+          });
+        }
+        return refuse('LICENSE_EXPIRED');
+      }
 
-    // Check if already revoked/expired
-    if (license.status === LicenseStatus.REVOKED) {
-      sendError(res, 'License has been revoked', 403);
-      return;
-    }
+      // Check pharmacy status if assigned
+      if (license.pharmacy && license.pharmacy.status !== PharmacyStatus.ACTIVE) {
+        return refuse(
+          pharmacyRefusalCode(license.pharmacy.status),
+          pharmacyActivationText(license.pharmacy.status)
+        );
+      }
 
-    if (license.status === LicenseStatus.EXPIRED) {
-      sendError(res, 'License has expired', 403);
-      return;
-    }
+      const activeActivations = await tx.licenseActivation.findMany({
+        where: { licenseId: license.id, isActive: true },
+        orderBy: { activatedAt: 'asc' },
+      });
 
-    // Check pharmacy status if assigned
-    if (license.pharmacy && license.pharmacy.status !== PharmacyStatus.ACTIVE) {
-      const statusText = license.pharmacy.status ? license.pharmacy.status.toLowerCase() : 'inactive';
-      sendError(res, `Pharmacy account is ${statusText}. Contact support to reactivate.`, 403);
-      return;
-    }
+      // The plan, before anything is written: no seat for a licence without one
+      const features = await readPlanFeatures(tx, license);
+      if (!features) return refuse('PLAN_UNAVAILABLE');
 
-    // Check activation limit
-    if (license.activations.length >= license.maxActivations) {
-      // Check if device is already activated
-      const existingActivation = license.activations.find(
-        (a) => a.deviceId === deviceId || a.deviceFingerprint === deviceFingerprint
-      );
-
+      // This PC already holds a seat: give it back, change nothing
+      const existingActivation = deviceId
+        ? activeActivations.find((a) => a.deviceId === deviceId)
+        : deviceFingerprint
+          ? activeActivations.find((a) => a.deviceFingerprint === deviceFingerprint)
+          : undefined;
       if (existingActivation) {
-        // Get fresh features from database based on tier
-        const tierCode = license.tierCode || license.tier;
-        const freshFeatures = await getTierFeaturesFromDb(tierCode);
-
-        // Return existing activation info with fresh features
-        sendSuccess(res, {
-          activated: true,
+        return {
           alreadyActivated: true,
           license: {
             tier: license.tier,
             tierCode: license.tierCode,
-            features: freshFeatures,
+            validFrom: license.validFrom,
             expiresAt: license.expiresAt,
           },
+          features,
           activation: {
             id: existingActivation.id,
             deviceName: existingActivation.deviceName,
             activatedAt: existingActivation.activatedAt,
           },
-        }, 'Device already activated');
-        return;
+        };
       }
 
-      sendError(res, 'Maximum activations reached for this license', 403);
+      if (activeActivations.length >= license.maxActivations) {
+        return refuse('ACTIVATION_LIMIT_REACHED');
+      }
+
+      // Create or find pharmacy if data provided
+      let pharmacyId = license.pharmacyId;
+      if (!pharmacyId && pharmacyData && typeof pharmacyData.email === 'string' && pharmacyData.email) {
+        const pharmacyEmail = pharmacyData.email.toLowerCase();
+
+        // Try to find existing pharmacy by email
+        let pharmacy = await tx.pharmacy.findUnique({
+          where: { email: pharmacyEmail },
+        });
+
+        if (!pharmacy) {
+          // Create new pharmacy
+          pharmacy = await tx.pharmacy.create({
+            data: {
+              name: pharmacyData.name || 'Unknown Pharmacy',
+              email: pharmacyEmail,
+              phone: pharmacyData.phone,
+              address: pharmacyData.address,
+              city: pharmacyData.city,
+              region: pharmacyData.region,
+              country: pharmacyData.country || 'Ghana',
+              registrationNumber: pharmacyData.registrationNumber,
+              status: PharmacyStatus.ACTIVE,
+            },
+          });
+        } else if (pharmacy.status !== PharmacyStatus.ACTIVE) {
+          // Existing pharmacy is not active
+          return refuse(pharmacyRefusalCode(pharmacy.status), pharmacyActivationText(pharmacy.status));
+        }
+        pharmacyId = pharmacy.id;
+      }
+
+      // Only the first activation starts the term; an expiry set since (by
+      // this or by Renew) is kept as it is
+      const expiresAt = license.expiresAt ?? addDays(now, license.durationDays);
+      const validFrom = license.validFrom ?? now;
+
+      const activation = await tx.licenseActivation.create({
+        data: {
+          licenseId: license.id,
+          pharmacyId,
+          deviceId,
+          deviceName,
+          deviceFingerprint,
+          ipAddress: req.ip,
+          userAgent: req.headers['user-agent'],
+        },
+      });
+
+      await tx.license.update({
+        where: { id: license.id },
+        data: {
+          // INACTIVE becomes ACTIVE; every other status was refused above
+          status: LicenseStatus.ACTIVE,
+          pharmacyId,
+          currentActivations: activeActivations.length + 1,
+          activatedAt: license.activatedAt ?? now,
+          validFrom,
+          validUntil: license.validUntil ?? expiresAt,
+          expiresAt,
+          features: features as Prisma.InputJsonValue, // cached copy of the plan
+        },
+      });
+
+      await tx.auditLog.create({
+        data: {
+          action: AuditAction.ACTIVATE,
+          entityType: 'License',
+          entityId: license.id,
+          description: `License activated for device: ${deviceName || deviceId || 'Unknown'}`,
+          newValue: { deviceId, deviceName, pharmacyId },
+          ipAddress: req.ip,
+          userAgent: req.headers['user-agent'],
+        },
+      });
+
+      return {
+        alreadyActivated: false,
+        license: { tier: license.tier, tierCode: license.tierCode, validFrom, expiresAt },
+        features,
+        activation: {
+          id: activation.id,
+          deviceName: activation.deviceName,
+          activatedAt: activation.activatedAt,
+        },
+      };
+    }, LICENCE_TX_OPTIONS);
+
+    if (isRefusal(outcome)) {
+      sendRefusal(res, outcome);
       return;
     }
 
-    // Create or find pharmacy if data provided
-    let pharmacyId = license.pharmacyId;
-    if (pharmacyData && pharmacyData.email && !pharmacyId) {
-      const pharmacyEmail = pharmacyData.email.toLowerCase();
-
-      // Try to find existing pharmacy by email
-      let pharmacy = await prisma.pharmacy.findUnique({
-        where: { email: pharmacyEmail },
-      });
-
-      if (!pharmacy) {
-        // Create new pharmacy
-        pharmacy = await prisma.pharmacy.create({
-          data: {
-            name: pharmacyData.name || 'Unknown Pharmacy',
-            email: pharmacyEmail,
-            phone: pharmacyData.phone,
-            address: pharmacyData.address,
-            city: pharmacyData.city,
-            region: pharmacyData.region,
-            country: pharmacyData.country || 'Ghana',
-            registrationNumber: pharmacyData.registrationNumber,
-            status: PharmacyStatus.ACTIVE,
-          },
-        });
-      } else if (pharmacy.status !== PharmacyStatus.ACTIVE) {
-        // Existing pharmacy is not active
-        const statusText = pharmacy.status ? pharmacy.status.toLowerCase() : 'inactive';
-        sendError(res, `Pharmacy account is ${statusText}. Contact support to reactivate.`, 403);
-        return;
-      }
-      pharmacyId = pharmacy.id;
+    if (outcome.alreadyActivated) {
+      sendSuccess(res, {
+        activated: true,
+        alreadyActivated: true,
+        license: {
+          tier: outcome.license.tier,
+          tierCode: outcome.license.tierCode,
+          features: outcome.features,
+          expiresAt: outcome.license.expiresAt,
+        },
+        activation: outcome.activation,
+      }, 'Device already activated');
+      return;
     }
-
-    // Calculate expiry date
-    const now = new Date();
-    const expiresAt = new Date(now.getTime() + license.durationDays * 24 * 60 * 60 * 1000);
-
-    // Get fresh features from database
-    const tierCode = license.tierCode || license.tier;
-    const freshFeatures = await getTierFeaturesFromDb(tierCode);
-
-    // Create activation
-    const activation = await prisma.licenseActivation.create({
-      data: {
-        licenseId: license.id,
-        pharmacyId,
-        deviceId,
-        deviceName,
-        deviceFingerprint,
-        ipAddress: req.ip,
-        userAgent: req.headers['user-agent'],
-      },
-    });
-
-    // Update license with fresh features from database
-    await prisma.license.update({
-      where: { id: license.id },
-      data: {
-        status: LicenseStatus.ACTIVE,
-        pharmacyId,
-        currentActivations: license.activations.length + 1,
-        activatedAt: license.activatedAt || now,
-        validFrom: license.validFrom || now,
-        validUntil: expiresAt,
-        expiresAt,
-        features: freshFeatures as Prisma.InputJsonValue, // Update cached features with fresh DB values
-      },
-    });
-
-    // Create audit log
-    await prisma.auditLog.create({
-      data: {
-        action: AuditAction.ACTIVATE,
-        entityType: 'License',
-        entityId: license.id,
-        description: `License activated for device: ${deviceName || deviceId || 'Unknown'}`,
-        newValue: { deviceId, deviceName, pharmacyId },
-        ipAddress: req.ip,
-        userAgent: req.headers['user-agent'],
-      },
-    });
 
     sendSuccess(res, {
       activated: true,
       license: {
-        tier: license.tier,
-        tierCode: license.tierCode,
-        features: freshFeatures,
-        validFrom: now,
-        expiresAt,
+        tier: outcome.license.tier,
+        tierCode: outcome.license.tierCode,
+        features: outcome.features,
+        validFrom: outcome.license.validFrom,
+        expiresAt: outcome.license.expiresAt,
       },
-      activation: {
-        id: activation.id,
-        deviceName: activation.deviceName,
-        activatedAt: activation.activatedAt,
-      },
+      activation: outcome.activation,
     }, 'License activated successfully');
   } catch (error) {
     console.error('Activate license error:', error);
-    sendError(res, 'License activation failed', 500);
+    sendLicenceError(res, 'ACTIVATE_FAILED');
   }
 }
 
 /**
  * Deactivate a license on a device (public endpoint)
+ *
+ * Works for every licence status: desktop 1.2.0's Deactivate relies on it to
+ * put a suspended or expired PC back on the free plan. With a deviceId, every
+ * active seat of that device is freed (older servers could give one PC two).
  */
 export async function deactivateLicense(req: Request, res: Response): Promise<void> {
   try {
-    const { licenseKey, deviceId, activationId } = req.body;
+    const { licenseKey, deviceId, activationId } = req.body ?? {};
 
     if (!licenseKey) {
-      sendError(res, 'License key is required', 400);
+      sendLicenceError(res, 'LICENSE_KEY_REQUIRED');
+      return;
+    }
+    if (typeof licenseKey !== 'string') {
+      sendLicenceError(res, 'LICENSE_NOT_FOUND');
       return;
     }
 
     const license = await prisma.license.findUnique({
-      where: { licenseKey: licenseKey.toUpperCase() },
+      where: { licenseKey: licenseKey.trim().toUpperCase() },
     });
 
     if (!license) {
-      sendError(res, 'License key not found', 404);
+      sendLicenceError(res, 'LICENSE_NOT_FOUND');
       return;
     }
 
     // Find the activation to deactivate
-    const whereClause: Record<string, unknown> = {
+    const target: Prisma.LicenseActivationWhereInput = {
       licenseId: license.id,
       isActive: true,
     };
-
     if (activationId) {
-      whereClause.id = activationId;
+      target.id = String(activationId);
     } else if (deviceId) {
-      whereClause.deviceId = deviceId;
+      target.deviceId = String(deviceId);
     } else {
-      sendError(res, 'Device ID or activation ID is required', 400);
+      sendLicenceError(res, 'DEVICE_ID_REQUIRED');
       return;
     }
 
-    const activation = await prisma.licenseActivation.findFirst({
-      where: whereClause,
-    });
+    const deactivated = await prisma.$transaction(async (tx) => {
+      await lockLicence(tx, license.id);
 
-    if (!activation) {
-      sendError(res, 'Active activation not found', 404);
+      const activations = await tx.licenseActivation.findMany({ where: target });
+      if (activations.length === 0) return null;
+
+      await tx.licenseActivation.updateMany({
+        where: { id: { in: activations.map((a) => a.id) } },
+        data: {
+          isActive: false,
+          deactivatedAt: new Date(),
+        },
+      });
+
+      // Seats in use, counted rather than decremented (never negative)
+      await tx.license.update({
+        where: { id: license.id },
+        data: { currentActivations: await countActiveActivations(tx, license.id) },
+      });
+
+      const first = activations[0];
+      await tx.auditLog.create({
+        data: {
+          action: AuditAction.DEACTIVATE,
+          entityType: 'License',
+          entityId: license.id,
+          description: `License deactivated for device: ${first.deviceName || first.deviceId || 'Unknown'}`,
+          newValue: { activationIds: activations.map((a) => a.id) },
+          ipAddress: req.ip,
+          userAgent: req.headers['user-agent'],
+        },
+      });
+
+      return activations;
+    }, LICENCE_TX_OPTIONS);
+
+    if (!deactivated) {
+      sendLicenceError(res, 'ACTIVE_ACTIVATION_NOT_FOUND');
       return;
     }
-
-    // Deactivate
-    await prisma.licenseActivation.update({
-      where: { id: activation.id },
-      data: {
-        isActive: false,
-        deactivatedAt: new Date(),
-      },
-    });
-
-    // Update license activation count
-    await prisma.license.update({
-      where: { id: license.id },
-      data: {
-        currentActivations: { decrement: 1 },
-      },
-    });
-
-    // Create audit log
-    await prisma.auditLog.create({
-      data: {
-        action: AuditAction.DEACTIVATE,
-        entityType: 'License',
-        entityId: license.id,
-        description: `License deactivated for device: ${activation.deviceName || activation.deviceId || 'Unknown'}`,
-        ipAddress: req.ip,
-        userAgent: req.headers['user-agent'],
-      },
-    });
 
     sendSuccess(res, null, 'License deactivated successfully');
   } catch (error) {
     console.error('Deactivate license error:', error);
-    sendError(res, 'License deactivation failed', 500);
+    sendLicenceError(res, 'DEACTIVATE_FAILED');
   }
 }
 
@@ -524,7 +572,7 @@ async function logVerification(
 ): Promise<void> {
   try {
     const license = await prisma.license.findUnique({
-      where: { licenseKey: licenseKey.toUpperCase() },
+      where: { licenseKey: licenseKey.trim().toUpperCase() },
     });
 
     if (license) {
@@ -547,7 +595,7 @@ async function logVerificationById(
         licenseId,
         ipAddress: req.ip,
         userAgent: req.headers['user-agent'],
-        deviceId: req.body.deviceId,
+        deviceId: bodyText(req.body?.deviceId),
         isValid,
         message,
       },

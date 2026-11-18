@@ -13,12 +13,24 @@ import {
 import clsx from 'clsx';
 import { format } from 'date-fns';
 import toast from 'react-hot-toast';
+import {
+  EXPIRING_SOON_DAYS,
+  daysUntil,
+  expiryHint,
+  licenceStatusColors,
+  licenceStatusLabels,
+} from '@/lib/licence';
+
+// The status filter's extra choice: active licences that expire soon
+const EXPIRING_SOON = 'EXPIRING_SOON';
 
 interface License {
   id: string;
   licenseKey: string;
   tier: string;
   status: string;
+  // The status it really has now (an ACTIVE licence past its date is EXPIRED)
+  effectiveStatus: string;
   createdAt: string;
   expiresAt: string | null;
   pharmacy: { id: string; name: string; email: string } | null;
@@ -42,14 +54,6 @@ const tierColors: Record<string, string> = {
   ENTERPRISE: 'badge bg-purple-100 text-purple-800',
 };
 
-const statusColors: Record<string, string> = {
-  ACTIVE: 'badge-success',
-  INACTIVE: 'badge-gray',
-  EXPIRED: 'badge-warning',
-  REVOKED: 'badge-danger',
-  SUSPENDED: 'badge-warning',
-};
-
 export default function LicensesPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const [search, setSearch] = useState(searchParams.get('search') || '');
@@ -66,7 +70,8 @@ export default function LicensesPage() {
       params.set('limit', '10');
       if (search) params.set('search', search);
       if (tier) params.set('tier', tier);
-      if (status) params.set('status', status);
+      if (status === EXPIRING_SOON) params.set('expiringWithinDays', String(EXPIRING_SOON_DAYS));
+      else if (status) params.set('status', status);
 
       const response = await api.get(`/licenses?${params}`);
       return { data: response.data.data, meta: response.data.meta };
@@ -167,6 +172,7 @@ export default function LicensesPage() {
               <option value="EXPIRED">Expired</option>
               <option value="REVOKED">Revoked</option>
               <option value="SUSPENDED">Suspended</option>
+              <option value={EXPIRING_SOON}>Expiring within {EXPIRING_SOON_DAYS} days</option>
             </select>
           </div>
         </div>
@@ -216,8 +222,8 @@ export default function LicensesPage() {
                         </span>
                       </td>
                       <td>
-                        <span className={clsx('badge', statusColors[license.status])}>
-                          {license.status}
+                        <span className={clsx('badge', licenceStatusColors[license.effectiveStatus])}>
+                          {licenceStatusLabels[license.effectiveStatus] || license.effectiveStatus}
                         </span>
                       </td>
                       <td>
@@ -237,9 +243,21 @@ export default function LicensesPage() {
                       </td>
                       <td>
                         {license.expiresAt ? (
-                          <span className="text-gray-600">
-                            {format(new Date(license.expiresAt), 'MMM d, yyyy')}
-                          </span>
+                          <div>
+                            <span className="text-gray-600">
+                              {format(new Date(license.expiresAt), 'MMM d, yyyy')}
+                            </span>
+                            {license.effectiveStatus === 'ACTIVE' && (
+                              <p
+                                className={clsx(
+                                  'text-xs',
+                                  daysUntil(license.expiresAt) <= EXPIRING_SOON_DAYS ? 'text-yellow-700' : 'text-gray-400'
+                                )}
+                              >
+                                {expiryHint(license.expiresAt)}
+                              </p>
+                            )}
+                          </div>
                         ) : (
                           <span className="text-gray-400">Not set</span>
                         )}

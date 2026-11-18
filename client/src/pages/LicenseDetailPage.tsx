@@ -11,12 +11,26 @@ import {
   ExclamationTriangleIcon,
 } from '@heroicons/react/24/outline';
 import { useState } from 'react';
+import { useAuth } from '@/contexts/AuthContext';
+import RenewLicenceModal, { type RenewBody } from '@/components/licence/RenewLicenceModal';
+import ReasonModal from '@/components/licence/ReasonModal';
+import {
+  EXPIRING_SOON_DAYS,
+  daysUntil,
+  expiryHint,
+  formatDate,
+  licenceStatusColors,
+  licenceStatusLabels,
+} from '@/lib/licence';
 
 interface License {
   id: string;
   licenseKey: string;
   tier: string;
+  tierCode: string | null;
   status: string;
+  // The status it really has now (an ACTIVE licence past its date is EXPIRED)
+  effectiveStatus: string;
   durationDays: number;
   maxActivations: number;
   currentActivations: number;
@@ -62,20 +76,21 @@ const tierColors: Record<string, string> = {
   ENTERPRISE: 'badge bg-purple-100 text-purple-800',
 };
 
-const statusColors: Record<string, string> = {
-  ACTIVE: 'badge-success',
-  INACTIVE: 'badge-gray',
-  EXPIRED: 'badge-warning',
-  REVOKED: 'badge-danger',
-  SUSPENDED: 'badge-warning',
-};
+type Dialog =
+  | { kind: 'renew' }
+  | { kind: 'suspend' }
+  | { kind: 'unsuspend' }
+  | { kind: 'revoke' }
+  | { kind: 'deactivate'; activationId: string; deviceName: string };
 
 export default function LicenseDetailPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
-  const [showRevokeModal, setShowRevokeModal] = useState(false);
-  const [revokeReason, setRevokeReason] = useState('');
+  const { user } = useAuth();
+  // The server allows licence changes to admins only (support staff can look)
+  const canManage = user?.role === 'ADMIN' || user?.role === 'SUPER_ADMIN';
+  const [dialog, setDialog] = useState<Dialog | null>(null);
 
   const { data: license, isLoading } = useQuery<License>({
     queryKey: ['license', id],
@@ -85,20 +100,24 @@ export default function LicenseDetailPage() {
     },
   });
 
-  const revokeMutation = useMutation({
-    mutationFn: async () => {
-      const response = await api.post(`/licenses/${id}/revoke`, { reason: revokeReason });
+  // One mutation for every licence action: POST /licenses/:id/<path>
+  const actionMutation = useMutation({
+    mutationFn: async ({ path, body }: { path: string; body: object; success: string }) => {
+      const response = await api.post(`/licenses/${id}/${path}`, body);
       return response.data;
     },
-    onSuccess: () => {
-      toast.success('License revoked successfully');
+    onSuccess: (data, { success }) => {
+      const expiresAt = data?.data?.expiresAt;
+      toast.success(success === 'renew' && expiresAt ? `Licence renewed: it now expires on ${formatDate(expiresAt)}` : success);
       queryClient.invalidateQueries({ queryKey: ['license', id] });
-      setShowRevokeModal(false);
+      queryClient.invalidateQueries({ queryKey: ['licenses'] });
+      setDialog(null);
     },
     onError: (error) => {
       toast.error(getErrorMessage(error));
     },
   });
+  const runAction = (path: string, body: object, success: string) => actionMutation.mutate({ path, body, success });
 
   const copyToClipboard = (text: string) => {
     navigator.clipboard.writeText(text);
@@ -150,13 +169,24 @@ export default function LicenseDetailPage() {
             </div>
           </div>
         </div>
-        {license.status !== 'REVOKED' && (
-          <button
-            onClick={() => setShowRevokeModal(true)}
-            className="btn btn-danger"
-          >
-            Revoke License
-          </button>
+        {canManage && license.status !== 'REVOKED' && (
+          <div className="flex flex-wrap gap-2 justify-end">
+            <button onClick={() => setDialog({ kind: 'renew' })} className="btn btn-primary">
+              Renew / extend
+            </button>
+            {license.status === 'SUSPENDED' ? (
+              <button onClick={() => setDialog({ kind: 'unsuspend' })} className="btn btn-success">
+                Lift suspension
+              </button>
+            ) : (
+              <button onClick={() => setDialog({ kind: 'suspend' })} className="btn btn-secondary">
+                Suspend
+              </button>
+            )}
+            <button onClick={() => setDialog({ kind: 'revoke' })} className="btn btn-danger">
+              Revoke License
+            </button>
+          </div>
         )}
       </div>
 
@@ -181,9 +211,14 @@ export default function LicenseDetailPage() {
                 <div>
                   <dt className="text-sm font-medium text-gray-500">Status</dt>
                   <dd className="mt-1">
-                    <span className={clsx('badge', statusColors[license.status])}>
-                      {license.status}
+                    <span className={clsx('badge', licenceStatusColors[license.effectiveStatus])}>
+                      {licenceStatusLabels[license.effectiveStatus] || license.effectiveStatus}
                     </span>
+                    {license.effectiveStatus !== license.status && (
+                      <p className="mt-1 text-xs text-gray-500">
+                        Past its expiry date (the server marks it expired at its next check)
+                      </p>
+                    )}
                   </dd>
                 </div>
                 <div>
@@ -213,9 +248,21 @@ export default function LicenseDetailPage() {
                 <div>
                   <dt className="text-sm font-medium text-gray-500">Expires</dt>
                   <dd className="mt-1 text-sm text-gray-900">
-                    {license.expiresAt
-                      ? format(new Date(license.expiresAt), 'MMM d, yyyy')
-                      : 'Not set'}
+                    {license.expiresAt ? (
+                      <>
+                        {format(new Date(license.expiresAt), 'MMM d, yyyy')}{' '}
+                        <span
+                          className={clsx(
+                            'text-xs',
+                            daysUntil(license.expiresAt) <= EXPIRING_SOON_DAYS ? 'text-yellow-700' : 'text-gray-500'
+                          )}
+                        >
+                          ({expiryHint(license.expiresAt)})
+                        </span>
+                      </>
+                    ) : (
+                      `${license.durationDays} days from the first activation`
+                    )}
                   </dd>
                 </div>
                 <div>
@@ -254,6 +301,7 @@ export default function LicenseDetailPage() {
                       <th>IP Address</th>
                       <th>Status</th>
                       <th>Activated</th>
+                      {canManage && <th className="sr-only">Actions</th>}
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-gray-200 bg-white">
@@ -279,6 +327,24 @@ export default function LicenseDetailPage() {
                         <td className="text-gray-500">
                           {format(new Date(activation.activatedAt), 'MMM d, yyyy')}
                         </td>
+                        {canManage && (
+                          <td className="text-right">
+                            {activation.isActive && (
+                              <button
+                                onClick={() =>
+                                  setDialog({
+                                    kind: 'deactivate',
+                                    activationId: activation.id,
+                                    deviceName: activation.deviceName || activation.deviceId || 'this PC',
+                                  })
+                                }
+                                className="text-sm text-red-600 hover:text-red-700"
+                              >
+                                Deactivate
+                              </button>
+                            )}
+                          </td>
+                        )}
                       </tr>
                     ))}
                   </tbody>
@@ -395,51 +461,83 @@ export default function LicenseDetailPage() {
         </div>
       </div>
 
-      {/* Revoke Modal */}
-      {showRevokeModal && (
-        <div className="fixed inset-0 z-50 overflow-y-auto">
-          <div className="flex items-center justify-center min-h-screen px-4">
-            <div className="fixed inset-0 bg-gray-500 bg-opacity-75" onClick={() => setShowRevokeModal(false)} />
-            <div className="relative bg-white rounded-lg max-w-md w-full p-6">
-              <div className="flex items-center gap-4 mb-4">
-                <div className="flex-shrink-0 w-12 h-12 flex items-center justify-center rounded-full bg-red-100">
-                  <ExclamationTriangleIcon className="h-6 w-6 text-red-600" />
-                </div>
-                <div>
-                  <h3 className="text-lg font-medium text-gray-900">Revoke License</h3>
-                  <p className="text-sm text-gray-500">
-                    This action cannot be undone.
-                  </p>
-                </div>
-              </div>
-              <div className="mb-4">
-                <label className="label">Reason (optional)</label>
-                <textarea
-                  value={revokeReason}
-                  onChange={(e) => setRevokeReason(e.target.value)}
-                  rows={3}
-                  className="input"
-                  placeholder="Reason for revocation..."
-                />
-              </div>
-              <div className="flex gap-3">
-                <button
-                  onClick={() => setShowRevokeModal(false)}
-                  className="btn btn-secondary flex-1"
-                >
-                  Cancel
-                </button>
-                <button
-                  onClick={() => revokeMutation.mutate()}
-                  disabled={revokeMutation.isPending}
-                  className="btn btn-danger flex-1"
-                >
-                  {revokeMutation.isPending ? 'Revoking...' : 'Revoke License'}
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
+      {dialog?.kind === 'renew' && (
+        <RenewLicenceModal
+          license={license}
+          busy={actionMutation.isPending}
+          onSubmit={(body: RenewBody) => runAction('renew', body, 'renew')}
+          onClose={() => setDialog(null)}
+        />
+      )}
+
+      {dialog?.kind === 'suspend' && (
+        <ReasonModal
+          title="Suspend licence"
+          confirmLabel="Suspend licence"
+          busyLabel="Suspending..."
+          busy={actionMutation.isPending}
+          onConfirm={(reason) => runAction('suspend', { reason }, 'Licence suspended')}
+          onClose={() => setDialog(null)}
+        >
+          <p>
+            The licence server will refuse this licence (checks and new activations) until you lift the suspension.
+          </p>
+          <p>Its PCs stay activated, so lifting the suspension puts everything back as it was.</p>
+        </ReasonModal>
+      )}
+
+      {dialog?.kind === 'unsuspend' && (
+        <ReasonModal
+          title="Lift the suspension"
+          confirmLabel="Lift suspension"
+          busyLabel="Saving..."
+          busy={actionMutation.isPending}
+          onConfirm={(reason) => runAction('unsuspend', { reason }, 'Suspension lifted')}
+          onClose={() => setDialog(null)}
+        >
+          <p>
+            The licence works again at the pharmacy's next licence check.
+            {license.expiresAt && daysUntil(license.expiresAt) <= 0 && ' Its expiry date has passed, so renew it as well.'}
+          </p>
+        </ReasonModal>
+      )}
+
+      {dialog?.kind === 'revoke' && (
+        <ReasonModal
+          title="Revoke License"
+          confirmLabel="Revoke License"
+          busyLabel="Revoking..."
+          danger
+          busy={actionMutation.isPending}
+          reasonPlaceholder="Reason for revocation..."
+          onConfirm={(reason) => runAction('revoke', { reason }, 'License revoked successfully')}
+          onClose={() => setDialog(null)}
+        >
+          <p className="flex items-center gap-2">
+            <ExclamationTriangleIcon className="h-5 w-5 text-red-600 flex-shrink-0" />
+            This action cannot be undone. Every PC's activation ends. To pause a licence, suspend it instead.
+          </p>
+        </ReasonModal>
+      )}
+
+      {dialog?.kind === 'deactivate' && (
+        <ReasonModal
+          title={`Deactivate ${dialog.deviceName}`}
+          confirmLabel="Deactivate PC"
+          busyLabel="Deactivating..."
+          danger
+          busy={actionMutation.isPending}
+          onConfirm={(reason) =>
+            runAction(`activations/${dialog.activationId}/deactivate`, { reason }, 'PC deactivated: its seat is free')
+          }
+          onClose={() => setDialog(null)}
+        >
+          <p>
+            This frees the PC's seat so another PC can be activated with this licence. The licence and its expiry
+            date don't change.
+          </p>
+          <p>Use it for a PC that was replaced, lost or broken. It does not switch the PC itself off.</p>
+        </ReasonModal>
       )}
     </div>
   );
