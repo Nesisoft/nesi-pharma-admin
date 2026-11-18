@@ -12,9 +12,12 @@ npm run dev                # server (:5000, ts via tsx) + client (Vite :3300: la
 npm run build              # tsc server + vite client
 npm run db:push            # sync Prisma schema to the database (how environments are created today)
 npm run db:seed            # server/prisma/seed.ts: tiers, features, first SUPER_ADMIN
+npm test                   # server tests (node:test + tsx, server/test): no database needed
 ```
 
-There are no automated tests yet.
+Server tests run against an in-memory Prisma stand-in (`server/test/helpers/fakePrisma.ts`)
+and call the Express handlers directly (`helpers/http.ts`); they never touch a real
+database. There is no CI yet: run `npm test` and `npm run build` before opening a PR.
 
 ## Layout
 
@@ -97,5 +100,19 @@ There are no automated tests yet.
   (`client/src/landing/site.ts`), a copy of the desktop app's list: update both together.
 - Render's free plan sleeps after 15 minutes idle and takes about a minute to wake; the
   landing page and the desktop app wait for it (Vercel's proxy allows 120 s).
+- Public licence errors (`server/src/utils/licenseErrors.ts`) are `{ success, error, code }`.
+  Installed desktop apps match some `error` texts exactly (`License has been revoked`,
+  `... suspended`, `License has expired`, `Pharmacy account is not active`) and treat any
+  5xx as "server unreachable": never reword an existing text, add a new `code` instead.
+- Licence term: only the first activation sets `expiresAt` (now + `durationDays`); later
+  activations keep it. Extending is the admin's Renew (`POST /licenses/:id/renew`,
+  `server/src/utils/licenseRenewal.ts`): from the later of today and the current expiry,
+  expired becomes active, suspended stays suspended, revoked is refused, an earlier date
+  needs `allowShorten`. Status changes go through Renew, Suspend, Lift suspension and
+  Revoke, not `PUT /licenses/:id`.
+- Activations, deactivations and admin licence actions lock the licence row
+  (`lockLicence`, `SELECT ... FOR UPDATE`) inside a transaction, so seats can't be
+  over-used. Verify and activate answer 500 (`PLAN_UNAVAILABLE`) rather than "valid" with
+  no features when the plan can't be read.
 - Licence keys are not signed tokens: the desktop app stores the activated licence in
   its own database and trusts it (see the roadmap for the signed-licence plan).
