@@ -114,5 +114,18 @@ database. There is no CI yet: run `npm test` and `npm run build` before opening 
   (`lockLicence`, `SELECT ... FOR UPDATE`) inside a transaction, so seats can't be
   over-used. Verify and activate answer 500 (`PLAN_UNAVAILABLE`) rather than "valid" with
   no features when the plan can't be read.
-- Licence keys are not signed tokens: the desktop app stores the activated licence in
-  its own database and trusts it (see the roadmap for the signed-licence plan).
+- Signed licences (`server/src/utils/licenceToken.ts`): desktop 1.4.0+ trust only what
+  this server signed with `LICENSE_SIGNING_KEY` (Ed25519, made by
+  `cd server && npm run licence:keygen -- <file outside the repos>`; the desktop has the
+  public key in `backend/src/constants/licencePublicKeys.js`). Never change or lose the key
+  once 1.4.0 apps are out: they trust only the public key built into them. A set but
+  unreadable key stops the server at start; an unset one only warns, and then 1.4.0 apps
+  stay on the free plan.
+  - Activation and verify (when the request sends `tokenVersion: 1`, 1.4.0+) answer
+    `token`: the licence, its activation and device id, the plan's features and limits,
+    and a 60-day lease (`until`). The app must verify again before it ends, so a revoked
+    licence's paid features stop at the latest 60 days later even if its database is edited.
+  - Verify with `tokenVersion` refuses an activation recorded for another device id
+    (`ACTIVATION_OTHER_DEVICE`): a copy of a pharmacy's data on another PC must be
+    activated there. An activation without a device id takes the first one that asks.
+  - `GET /plans` adds `freePlanToken`, the BASIC plan signed: the app's free plan.

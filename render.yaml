@@ -33,6 +33,11 @@ services:
       # Never change it once licences are issued: activation checks key checksums with it
       - key: LICENSE_SECRET_KEY
         generateValue: true
+      # Signs licences for desktop 1.4.0+ (Ed25519 private key, from npm run licence:keygen
+      # in server/). Set by hand; never change it once 1.4.0 apps are out: they trust only
+      # the public key built into them.
+      - key: LICENSE_SIGNING_KEY
+        sync: false
       - key: CORS_ORIGIN
         value: https://pharma.nesisoft.com
       # Vercel + Render's load balancer: see GET /api/health
