@@ -30,6 +30,8 @@ export const LICENCE_ERRORS = {
   // Verify, only when the request names its activation (activationId)
   ACTIVATION_NOT_FOUND: { status: 403, message: 'This PC is not activated for this licence' },
   ACTIVATION_INACTIVE: { status: 403, message: "This PC's activation is no longer active" },
+  // Verify from desktop 1.4.0+ (tokenVersion): the activation belongs to another PC
+  ACTIVATION_OTHER_DEVICE: { status: 403, message: 'This licence is activated on another PC' },
   // Deactivate
   DEVICE_ID_REQUIRED: { status: 400, message: 'Device ID or activation ID is required' },
   ACTIVE_ACTIVATION_NOT_FOUND: { status: 404, message: 'Active activation not found' },

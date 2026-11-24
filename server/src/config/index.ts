@@ -65,6 +65,10 @@ if (config.isProduction) {
   if (!process.env.LICENSE_SECRET_KEY) {
     console.warn('WARNING: LICENSE_SECRET_KEY is not set; licence key checksums use the default secret');
   }
+  // Desktop 1.4.0 and later trust only signed licences (utils/licenceToken.ts)
+  if (!process.env.LICENSE_SIGNING_KEY) {
+    console.warn('WARNING: LICENSE_SIGNING_KEY is not set; licences are not signed and desktop 1.4.0+ apps stay on the free plan');
+  }
 }
 
 export default config;

@@ -16,6 +16,13 @@ import {
 import { addDays, effectiveStatus } from '../utils/licenseStatus';
 import { LICENCE_TX_OPTIONS, countActiveActivations, lockLicence } from '../utils/licenseTx';
 import { readPlanFeatures } from '../utils/licensePlan';
+import { signFreePlanToken, signLicenceToken } from '../utils/licenceToken';
+
+// The free plan (unlicensed PCs) in GET /plans
+const FREE_PLAN_CODE = 'BASIC';
+
+/** Does the request come from an app that wants a signed licence (desktop 1.4.0+)? */
+const wantsToken = (body: unknown) => Number((body as { tokenVersion?: unknown } | undefined)?.tokenVersion) >= 1;
 
 /** A short text from the request body, or null */
 function bodyText(value: unknown, max = 255): string | null {
@@ -44,10 +51,18 @@ function readLicenceKey(licenseKey: unknown): { key: string } | LicenceRefusal {
  * Desktop apps call it on a timer and at sign-in. Opt-in: a request that names
  * its activation (activationId, sent by desktop 1.3.0 and later) is refused
  * when that activation is unknown or no longer active; 1.1.0/1.2.0 send none.
+ *
+ * Desktop 1.4.0 and later also send tokenVersion: 1 and their deviceId, and
+ * get a signed licence (token) for that PC. The activation belongs to one PC:
+ * another device id is refused (ACTIVATION_OTHER_DEVICE: a copy of the
+ * pharmacy's data on another PC must be activated there). An activation that
+ * never recorded its device (very old apps) takes the first one that asks.
  */
 export async function verifyLicense(req: Request, res: Response): Promise<void> {
   try {
     const { licenseKey, activationId } = req.body ?? {};
+    const deviceId = bodyText(req.body?.deviceId);
+    const tokenWanted = wantsToken(req.body);
 
     const checked = readLicenceKey(licenseKey);
     if (isRefusal(checked)) {
@@ -110,6 +125,8 @@ export async function verifyLicense(req: Request, res: Response): Promise<void> 
       return;
     }
 
+    // The PC the signed licence is for (desktop 1.4.0+ with its activation)
+    let tokenDevice: { activationId: string; deviceId: string } | null = null;
     if (activationId !== undefined && activationId !== null && activationId !== '') {
       const activation =
         typeof activationId === 'string'
@@ -125,6 +142,23 @@ export async function verifyLicense(req: Request, res: Response): Promise<void> 
         sendLicenceError(res, 'ACTIVATION_INACTIVE');
         return;
       }
+      if (tokenWanted && deviceId) {
+        let boundDevice = activation.deviceId;
+        if (!boundDevice) {
+          // Never recorded: this PC takes it (unless another one just did)
+          await prisma.licenseActivation.updateMany({
+            where: { id: activation.id, deviceId: null },
+            data: { deviceId },
+          });
+          boundDevice = (await prisma.licenseActivation.findUnique({ where: { id: activation.id } }))?.deviceId ?? null;
+        }
+        if (boundDevice !== deviceId) {
+          await logVerificationById(license.id, req, false, 'Activation belongs to another device');
+          sendLicenceError(res, 'ACTIVATION_OTHER_DEVICE');
+          return;
+        }
+        tokenDevice = { activationId: activation.id, deviceId };
+      }
     }
 
     // Fresh features from the plan: never "valid" without a plan
@@ -137,8 +171,19 @@ export async function verifyLicense(req: Request, res: Response): Promise<void> 
 
     await logVerificationById(license.id, req, true, 'License valid');
 
+    const token = tokenDevice
+      ? signLicenceToken({
+          licence: license,
+          activationId: tokenDevice.activationId,
+          deviceId: tokenDevice.deviceId,
+          features: freshFeatures,
+        })
+      : null;
+
     sendSuccess(res, {
       valid: true,
+      // A signed licence for this PC (desktop 1.4.0+), null without a signing key
+      ...(tokenWanted ? { token } : {}),
       license: {
         tier: license.tier,
         tierCode: license.tierCode,
@@ -163,9 +208,11 @@ type ActivationOutcome =
   | LicenceRefusal
   | {
       alreadyActivated: boolean;
-      license: { tier: string; tierCode: string | null; validFrom: Date | null; expiresAt: Date | null };
+      license: { id: string; tier: string; tierCode: string | null; validFrom: Date | null; expiresAt: Date | null };
       features: Record<string, unknown>;
       activation: { id: string; deviceName: string | null; activatedAt: Date };
+      /** The PC the activation belongs to, for the signed licence */
+      deviceId: string | null;
     };
 
 /**
@@ -264,6 +311,7 @@ export async function activateLicense(req: Request, res: Response): Promise<void
         return {
           alreadyActivated: true,
           license: {
+            id: license.id,
             tier: license.tier,
             tierCode: license.tierCode,
             validFrom: license.validFrom,
@@ -275,6 +323,7 @@ export async function activateLicense(req: Request, res: Response): Promise<void
             deviceName: existingActivation.deviceName,
             activatedAt: existingActivation.activatedAt,
           },
+          deviceId: existingActivation.deviceId,
         };
       }
 
@@ -360,13 +409,14 @@ export async function activateLicense(req: Request, res: Response): Promise<void
 
       return {
         alreadyActivated: false,
-        license: { tier: license.tier, tierCode: license.tierCode, validFrom, expiresAt },
+        license: { id: license.id, tier: license.tier, tierCode: license.tierCode, validFrom, expiresAt },
         features,
         activation: {
           id: activation.id,
           deviceName: activation.deviceName,
           activatedAt: activation.activatedAt,
         },
+        deviceId: activation.deviceId,
       };
     }, LICENCE_TX_OPTIONS);
 
@@ -375,10 +425,22 @@ export async function activateLicense(req: Request, res: Response): Promise<void
       return;
     }
 
+    // A signed licence for the PC the seat belongs to (desktop 1.4.0+ trust
+    // only this); null without a device id or a signing key
+    const token = outcome.deviceId
+      ? signLicenceToken({
+          licence: { ...outcome.license, licenseKey: checked.key },
+          activationId: outcome.activation.id,
+          deviceId: outcome.deviceId,
+          features: outcome.features,
+        })
+      : null;
+
     if (outcome.alreadyActivated) {
       sendSuccess(res, {
         activated: true,
         alreadyActivated: true,
+        token,
         license: {
           tier: outcome.license.tier,
           tierCode: outcome.license.tierCode,
@@ -392,6 +454,7 @@ export async function activateLicense(req: Request, res: Response): Promise<void
 
     sendSuccess(res, {
       activated: true,
+      token,
       license: {
         tier: outcome.license.tier,
         tierCode: outcome.license.tierCode,
@@ -556,7 +619,13 @@ export async function getPlans(req: Request, res: Response): Promise<void> {
       };
     });
 
-    sendSuccess(res, { plans, features: catalogue });
+    // The free plan, signed: desktop 1.4.0+ use only a signed copy (or their own built-in one)
+    const free = plans.find((plan) => plan.code === FREE_PLAN_CODE);
+    const freePlanToken = free
+      ? signFreePlanToken({ code: free.code, limits: free.limits, features: free.features })
+      : null;
+
+    sendSuccess(res, { plans, features: catalogue, freePlanToken });
   } catch (error) {
     console.error('Get plans error:', error);
     sendError(res, 'Failed to fetch plans', 500);
